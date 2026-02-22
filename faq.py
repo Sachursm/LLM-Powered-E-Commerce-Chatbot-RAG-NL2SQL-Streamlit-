@@ -111,7 +111,7 @@ def generate_answer(query: str, context: str):
 if __name__ == "__main__":
     load_faq_data(faq_path)
 
-    query = "Can you do international shipping to USA?"
+    query = "Do you take cash as a payment method?"
     
     print("\n--- Raw Retrieval ---")
     print(get_faq_answer(query))
