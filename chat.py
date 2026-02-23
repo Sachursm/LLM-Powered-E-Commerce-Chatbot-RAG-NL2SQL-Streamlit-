@@ -11,6 +11,10 @@
 """
 
 import streamlit as st
+from faq import get_faq_answer, chain, load_faq_data, generate_answer
+from router import rt
+import pandas as pd
+from pathlib import Path
 
 # ─────────────────────────────────────────────
 #  CONFIG — Customize these
@@ -24,31 +28,30 @@ BOT_NAME   = "Bot"           # Name shown in chat bubbles
 #  Input : history (list of {"role": ..., "content": ...})
 #  Output: reply string
 # ─────────────────────────────────────────────
+# ── Import your modules
+faq_path = Path(__file__).parent / "app/resources/faq_data.csv"
+load_faq_data(faq_path)
+
 
 def get_bot_response(history: list) -> str:
-    """
-    REPLACE THIS FUNCTION with your own chatbot logic.
+    query = history[-1]["content"]   # ← user's typed message
 
-    Args:
-        history: Full chat history as a list of dicts.
-                 Each dict has keys "role" and "content".
-                 - history[-1] is the latest user message.
-                 - Earlier entries give conversation context.
-    
-    Returns:
-        A string — the bot's reply to display in the chat.
+    # Step 1: Check query type using semantic router
+    route_name = rt(query).name    # returns "faq" or "sql"
+    route_name = route_name.lower() if route_name else "unknown"
+    print(route_name)
+    print(f"Route detected: {route_name}")
+    # Step 2: Route to correct function
+    if route_name == "faq":
+        raw = get_faq_answer(query)  # retrieval results
+        answer = chain(query)        # final LLM answer
+        return answer
 
-    Example replacements:
-        - Call OpenAI / Gemini / your local LLM API here
-        - Run a retrieval-augmented generation (RAG) pipeline
-        - Use a rule-based / keyword matching system
-        - Call any Python function that returns a string
-    """
+    elif route_name == "sql":
+        return "SQL questions are not implemented yet."
 
-    # ── DUMMY EXAMPLE (delete this and add your logic) ──
-    latest_user_message = history[-1]["content"]
-    return f"Echo: {latest_user_message}"   # <── Replace this line
-
+    else:
+        return generate_answer(query,context=history)  # default to LLM answer for unknown routes
 
 # ─────────────────────────────────────────────
 #  PAGE SETUP

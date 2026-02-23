@@ -117,5 +117,6 @@ rt = SemanticRouter(encoder=encoder, routes=routes , auto_sync="local")
 #rt.index()   # 🔑 builds vector index
 
 if __name__ == "__main__":
-    query = "What payment methods are accepted?"
-    print(rt(query).name)
+    pass
+    # query = "What payment methods are accepted?"
+    # print(rt(query).name)

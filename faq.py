@@ -85,6 +85,8 @@ def generate_answer(query: str, context: str):
         You can combine information from multiple context entries if needed. Be concise and accurate.
         If the answer is not in the context, say "I don't know", only bye pass this when the person is 
         asking about a specific product or service that is not in the context like in the example given below.
+        you can also use the context to answer questions that are not directly answered in the context but can 
+        be inferred from it, like hi how can i help you.
 
         --- Example ---
         Question: Do you ship internationally to Canada?
@@ -109,12 +111,13 @@ def generate_answer(query: str, context: str):
 
 # ---------- Run ----------
 if __name__ == "__main__":
-    load_faq_data(faq_path)
+    pass
+    # load_faq_data(faq_path)
 
-    query = "Do you take cash as a payment method?"
+    # query = "Do you take cash as a payment method?"
     
-    print("\n--- Raw Retrieval ---")
-    print(get_faq_answer(query))
+    # print("\n--- Raw Retrieval ---")
+    # print(get_faq_answer(query))
 
-    print("\n--- Final Answer ---")
-    print(chain(query))
+    # print("\n--- Final Answer ---")
+    # print(chain(query))
