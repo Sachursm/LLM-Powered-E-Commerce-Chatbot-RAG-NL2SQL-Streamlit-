@@ -1,0 +1,2 @@
+# Install if needed
+!pip install requests beautifulsoup4 pandas tqdm
