@@ -1,2 +1,3 @@
 # Install if needed
 !pip install requests beautifulsoup4 pandas tqdm
+!pip install selenium webdriver-manager
