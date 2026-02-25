@@ -15,6 +15,7 @@ from faq import get_faq_answer, chain, load_faq_data, generate_answer
 from router import rt
 import pandas as pd
 from pathlib import Path
+from sql import generate_query, run_query, extract_sql
 
 # ─────────────────────────────────────────────
 #  CONFIG — Customize these
@@ -33,7 +34,7 @@ faq_path = Path(__file__).parent / "app/resources/faq_data.csv"
 load_faq_data(faq_path)
 
 
-def get_bot_response(history: list) -> str:
+def get_bot_response(history: list):
     query = history[-1]["content"]   # ← user's typed message
 
     # Step 1: Check query type using semantic router
@@ -48,7 +49,9 @@ def get_bot_response(history: list) -> str:
         return answer
 
     elif route_name == "sql":
-        return "SQL questions are not implemented yet."
+        sql_query = generate_query(query)
+        results = run_query(sql_query)
+        return "Here are the matching products:", results
 
     else:
         return generate_answer(query,context=history)  # default to LLM answer for unknown routes
@@ -131,6 +134,27 @@ else:
                 unsafe_allow_html=True
             )
 
+            if "table" in message and message["table"] is not None:
+                df = message["table"].copy()
+
+                st.dataframe(
+                    df[["product_link", "title", "brand", "price", "avg_rating", "total_ratings"]],
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "product_link": st.column_config.LinkColumn(
+                            "Open",
+                            display_text="View",
+                            width="small"
+                        ),
+                        "title": "Product",
+                        "brand": "Brand",
+                        "price": st.column_config.NumberColumn("Price (₹)"),
+                        "avg_rating": st.column_config.NumberColumn("Rating"),
+                        "total_ratings": st.column_config.NumberColumn("Reviews"),
+                    }
+                )
+
 # ─────────────────────────────────────────────
 #  UI: Input box + Send button
 # ─────────────────────────────────────────────
@@ -157,12 +181,21 @@ if send_button and user_input.strip():
     # 2. Call YOUR function to get a reply
     with st.spinner("Thinking..."):
         try:
-            reply = get_bot_response(st.session_state.chat_history)  # ← your function called here
+            reply = get_bot_response(st.session_state.chat_history)
+
+            if isinstance(reply, tuple):
+                text, df = reply
+            else:
+                text, df = reply, None
         except Exception as e:
             reply = f"⚠️ Error: {str(e)}"   # graceful error display
 
     # 3. Append bot reply to history
-    st.session_state.chat_history.append({"role": "assistant", "content": reply})
+    st.session_state.chat_history.append({
+    "role": "assistant",
+    "content": text,
+    "table": df
+})
 
     # 4. Rerun to refresh the chat display
     st.rerun()
