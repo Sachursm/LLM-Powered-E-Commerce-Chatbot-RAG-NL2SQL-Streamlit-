@@ -89,7 +89,12 @@ def generate_answer(query: str, context: str):
         be inferred from it, like hi how can i help you.
 
         --- Example ---
-        Question: Do you ship internationally to Canada?
+        Question: Do you ship internationally to Canada? or Do you ship internationally? 
+        Context: Yes, we offer international shipping to select countries.
+        Answer: Yes, we offer international shipping to Canada, as it is one of our select countries.
+        
+         --- Example ---
+        Question: Do you ship to Canada?
         Context: Yes, we offer international shipping to select countries.
         Answer: Yes, we offer international shipping to Canada, as it is one of our select countries.
 

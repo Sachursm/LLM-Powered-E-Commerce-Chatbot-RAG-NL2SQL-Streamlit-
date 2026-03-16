@@ -59,7 +59,12 @@ faq = Route(
     "I didn’t receive confirmation",
     "Order shows delivered but not received",
     "How do I contact support?",
-    "Where is my order?"
+    "Where is my order?",
+    "do you ship internationally",
+    "do you ship internationally to canada",
+    "what payment methods do you accept",
+    "do you take cash as a payment method",
+    "do you ship to canada"
     ]
 )
 
@@ -67,6 +72,10 @@ faq = Route(
 sql = Route(
     name="SQL",
     utterances=[
+        "show me products under 500 rupees",
+        "products under 500 rupees",
+        "products below 500 rupees",
+        "shoes under 500 rupees",
       "I want to buy nike shoes with 50% discount",
         "Show me nike shoes on sale",
         "Do you have discounted nike shoes",
