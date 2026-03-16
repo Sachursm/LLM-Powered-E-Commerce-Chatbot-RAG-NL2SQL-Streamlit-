@@ -112,6 +112,42 @@ Intent Detection
    ↓
 FAQ | SQL | General LLM
 ```
+---
+
+## Demo
+
+### Chat UI
+> The main Streamlit chat interface
+
+![Chat UI](screenshots/fontui.png)
+
+---
+
+### General Conversation
+> Open-ended questions answered by Groq Llama-3
+
+![Normal Chat UI](screenshots/normal_chat_ui.png)
+
+---
+
+### FAQ Semantic Search
+> User asks a product question — ChromaDB finds the closest match from the knowledge base
+
+![FAQ UI](screenshots/faqui.png)
+
+---
+
+### Natural Language to SQL
+> User types a plain English question — the system converts it to a SQL query and runs it
+
+![SQL UI](screenshots/sqlui.png)
+
+---
+
+### SQL Table Result
+> Structured database results displayed as a clean table
+
+![Table UI](screenshots/tableui.png)
 
 ---
 
