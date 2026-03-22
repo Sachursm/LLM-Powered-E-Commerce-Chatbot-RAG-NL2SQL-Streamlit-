@@ -76,6 +76,7 @@ E_COMMERCE_CHATBOT/
 ├── sql.py                # NL → SQL → SQLite execution
 ├── router.py             # Intent classification logic
 ├── chat.py               # Streamlit interface
+├── api.py                # FastAPI REST API endpoint  
 │
 ├── venv/
 ├── web_venv/
