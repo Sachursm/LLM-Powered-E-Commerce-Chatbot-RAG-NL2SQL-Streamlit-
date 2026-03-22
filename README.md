@@ -260,6 +260,45 @@ Contains structured product data used for SQL queries.
 
 ---
 
+## API (FastAPI)
+
+The chatbot is also available as a REST API built with FastAPI.
+
+### Run the API
+```bash
+uvicorn api:app --reload
+```
+
+### Endpoint
+`POST /chat`
+
+**Request:**
+```json
+{"query": "your question here"}
+```
+
+**Example responses:**
+
+FAQ question:
+```json
+{"response": "Yes, we offer international shipping to select countries."}
+```
+
+SQL question:
+```json
+{"response": [{"title": "Nike shoes", "price": 999, "brand": "Nike"}]}
+```
+
+General question:
+```json
+{"response": "I am a customer support assistant, here to help you."}
+```
+
+### API Docs
+Visit `http://127.0.0.1:8000/docs` for interactive Swagger UI documentation.
+
+---
+
 # 👨‍💻 Author
 
 Sachu Retna S M
