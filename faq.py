@@ -86,7 +86,7 @@ def generate_answer(query: str, context: str):
         If the answer is not in the context, say "I don't know", only bye pass this when the person is 
         asking about a specific product or service that is not in the context like in the example given below.
         you can also use the context to answer questions that are not directly answered in the context but can 
-        be inferred from it, like hi how can i help you.
+        be inferred from it, like hi how can i help you, who are you.
 
         --- Example ---
         Question: Do you ship internationally to Canada? or Do you ship internationally? 
