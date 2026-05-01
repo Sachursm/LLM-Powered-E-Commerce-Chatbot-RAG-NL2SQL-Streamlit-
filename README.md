@@ -10,6 +10,16 @@ The chatbot is deployed with a Streamlit interface and runs in a WSL Ubuntu envi
 
 ---
 
+## 🏗️ System Architecture
+
+### 🔵 Ingestion Pipeline
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Sachursm/RealEstate-Research-Tool-RAG-Groq-Chroma-/4ce9117d7d44d49dddb579b054e8f662d2844c0c/digram/rag_architecture.jpg" width="500">
+</p>
+
+---
+
 # 🚀 Features
 
 ## 1️⃣ FAQ Retrieval (RAG)
