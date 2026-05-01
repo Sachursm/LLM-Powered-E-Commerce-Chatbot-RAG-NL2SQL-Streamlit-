@@ -15,7 +15,7 @@ The chatbot is deployed with a Streamlit interface and runs in a WSL Ubuntu envi
 ### 🔵 Ingestion Pipeline
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Sachursm/RealEstate-Research-Tool-RAG-Groq-Chroma-/4ce9117d7d44d49dddb579b054e8f662d2844c0c/digram/rag_architecture.jpg" width="500">
+  <img src="https://github.com/Sachursm/LLM-Powered-E-Commerce-Chatbot-RAG-NL2SQL-Streamlit-/blob/04b77fbb61ddd17a013473ca6d646d39666d15b1/Architecture/ecommerce_chatbot_architecture.png" width="500">
 </p>
 
 ---
