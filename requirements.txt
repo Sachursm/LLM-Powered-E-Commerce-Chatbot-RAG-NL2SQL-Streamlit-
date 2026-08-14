@@ -1,0 +1,10 @@
+langchain
+groq
+fastapi
+uvicorn
+streamlit
+python-dotenv
+pandas
+chromadb
+semantic-router[local]
+sentence_transformers
