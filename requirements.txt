@@ -8,3 +8,4 @@ pandas
 chromadb
 semantic-router[local]
 sentence_transformers
+pydantic
