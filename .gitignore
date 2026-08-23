@@ -6,3 +6,4 @@ test.py
 tests/
 test_cases/
 database_learning/
+db.sqlite
