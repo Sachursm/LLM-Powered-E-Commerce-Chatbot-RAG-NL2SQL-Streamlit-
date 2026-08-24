@@ -5,6 +5,8 @@ from app.database.models.product import Product
 from app.schemas.product import ProductResponse
 from app.database.dependencies import get_db
 from sqlalchemy.exc import SQLAlchemyError
+from app.database.models.category import Category
+
 
 
 router = APIRouter(
@@ -48,6 +50,33 @@ def get_product(
             )
 
         return product
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+@router.get("/", response_model=list[ProductResponse])
+def get_products(
+    category: str | None = None,
+    db: Session = Depends(get_db)
+):
+    try:
+        stmt = select(Product)
+
+        if category is not None:
+            stmt = (
+                select(Product)
+                .join(Category)
+                .where(Category.name == category)
+            )
+
+        result = db.execute(stmt)
+
+        products = result.scalars().all()
+
+        return products
 
     except SQLAlchemyError:
         raise HTTPException(
