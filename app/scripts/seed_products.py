@@ -21,7 +21,15 @@ def seed_products():
     try:
         for _, row in df.iterrows():
 
-            # Find category or create it
+            existing_product = (
+                session.query(Product)
+                .filter(Product.source_product_id == int(row["product_id"]))
+                .first()
+            )
+
+            if existing_product:
+                continue
+
             category = (
                 session.query(Category)
                 .filter(Category.name == row["category"])
@@ -32,12 +40,8 @@ def seed_products():
                 category = Category(
                     name=row["category"]
                 )
-
                 session.add(category)
                 session.flush()
-
-
-            # Create product
 
             product = Product(
                 source_product_id=int(row["product_id"]),
@@ -55,7 +59,7 @@ def seed_products():
 
         session.commit()
 
-        print(f"Successfully imported {len(df)} products.")
+        print("Product seeding completed.")
 
     except Exception as e:
         session.rollback()
