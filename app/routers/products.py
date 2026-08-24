@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
-
-from app.database.dependencies import get_db
+from sqlalchemy.orm import Session
 from app.database.models.product import Product
+from app.schemas.product import ProductResponse
+from app.database.dependencies import get_db
+from sqlalchemy.exc import SQLAlchemyError
+
 
 router = APIRouter(
     prefix="/products",
@@ -11,12 +13,18 @@ router = APIRouter(
 )
 
 
-@router.get("/")
-def get_products(
-    db: Session = Depends(get_db)
-):
-    stmt = select(Product).limit(5)
+@router.get("/", response_model=list[ProductResponse])
+def get_products(db: Session = Depends(get_db)):
 
-    products = db.execute(stmt).scalars().all()
+    try:
+        stmt = select(Product)
+        result = db.execute(stmt)
+        products = result.scalars().all()
 
-    return products
+        return products
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
