@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from app.database.models.product import Product
-from app.schemas.product import ProductResponse
+from app.schemas.product import ProductResponse, ProductCreate
 from app.database.dependencies import get_db
 from sqlalchemy.exc import SQLAlchemyError
 from app.database.models.category import Category
@@ -79,6 +79,39 @@ def get_products(
         return products
 
     except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+@router.post("/", response_model=ProductResponse)
+def create_product(
+    product_data: ProductCreate,
+    db: Session = Depends(get_db)
+):
+    try:
+        product = Product(
+            source_product_id=product_data.source_product_id,
+            name=product_data.name,
+            description=product_data.description,
+            price=product_data.price,
+            stock=product_data.stock,
+            image_url=product_data.image_url,
+            category_id=product_data.category_id
+        )
+
+        db.add(product)
+
+        db.commit()
+
+        db.refresh(product)
+
+        return product
+
+    except SQLAlchemyError:
+        db.rollback()
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"

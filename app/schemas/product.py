@@ -12,3 +12,14 @@ class ProductResponse(BaseModel):
     rating: float | None
     ratings_count: int | None
     category_id: int
+
+
+
+class ProductCreate(BaseModel):
+    source_product_id: int
+    name: str
+    description: str
+    price: float
+    stock: int
+    image_url: str
+    category_id: int
