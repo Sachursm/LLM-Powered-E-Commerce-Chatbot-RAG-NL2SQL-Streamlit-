@@ -12,3 +12,4 @@ pydantic
 PyJWT
 sqlalchemy
 pydantic-settings
+pandas
