@@ -192,3 +192,37 @@ def update_product(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
+
+@router.delete(
+    "/{product_id}",
+    status_code=status.HTTP_204_NO_CONTENT
+)
+def delete_product(
+    product_id: int,
+    db: Session = Depends(get_db)
+):
+    try:
+        stmt = select(Product).where(
+            Product.id == product_id
+        )
+
+        result = db.execute(stmt)
+
+        product = result.scalar_one_or_none()
+
+        if product is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
+
+        db.delete(product)
+        db.commit()
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
