@@ -21,4 +21,4 @@ class ProductCreate(BaseModel):
     price: float
     stock: int
     image_url: str
-    category_id: int
+    category: str

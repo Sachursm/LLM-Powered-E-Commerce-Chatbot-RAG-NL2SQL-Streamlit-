@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
-from app.database.models.product import Product
-from app.schemas.product import ProductResponse, ProductCreate
-from app.database.dependencies import get_db
 from sqlalchemy.exc import SQLAlchemyError
-from app.database.models.category import Category
+from sqlalchemy.orm import Session
 
+from app.database.dependencies import get_db
+from app.database.models.category import Category
+from app.database.models.product import Product
+from app.schemas.product import ProductCreate, ProductResponse
 
 
 router = APIRouter(
@@ -85,12 +85,28 @@ def get_products(
         )
 
 
-@router.post("/", response_model=ProductResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=ProductResponse,
+    status_code=status.HTTP_201_CREATED
+)
 def create_product(
     product_data: ProductCreate,
     db: Session = Depends(get_db)
 ):
     try:
+        category_stmt = select(Category).where(
+            Category.name == product_data.category
+        )
+
+        category = db.execute(category_stmt).scalar_one_or_none()
+
+        if category is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Category not found"
+            )
+
         product = Product(
             source_product_id=product_data.source_product_id,
             name=product_data.name,
@@ -98,13 +114,11 @@ def create_product(
             price=product_data.price,
             stock=product_data.stock,
             image_url=product_data.image_url,
-            category_id=product_data.category_id
+            category_id=category.id
         )
 
         db.add(product)
-
         db.commit()
-
         db.refresh(product)
 
         return product
