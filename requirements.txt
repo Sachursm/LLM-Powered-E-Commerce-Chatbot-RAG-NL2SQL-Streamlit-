@@ -13,3 +13,4 @@ PyJWT
 sqlalchemy
 pydantic-settings
 pandas
+alembic

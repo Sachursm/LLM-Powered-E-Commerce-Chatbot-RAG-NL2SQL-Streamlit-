@@ -3,7 +3,7 @@ from pydantic import BaseModel
 
 class ProductResponse(BaseModel):
     id: int
-    source_product_id: int
+    source_product_id: int | None
     name: str
     description: str
     price: float
@@ -14,9 +14,8 @@ class ProductResponse(BaseModel):
     category_id: int
 
 
-
 class ProductCreate(BaseModel):
-    source_product_id: int
+    source_product_id: int | None = None
     name: str
     description: str
     price: float
