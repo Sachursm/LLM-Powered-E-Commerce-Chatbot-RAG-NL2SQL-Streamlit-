@@ -6,7 +6,11 @@ from sqlalchemy.orm import Session
 from app.database.dependencies import get_db
 from app.database.models.category import Category
 from app.database.models.product import Product
-from app.schemas.product import ProductCreate, ProductResponse
+from app.schemas.product import (
+    ProductCreate,
+    ProductResponse,
+    ProductUpdate
+)
  
  
 router = APIRouter(
@@ -121,6 +125,69 @@ def create_product(
     except SQLAlchemyError:
         db.rollback()
  
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+@router.patch(
+    "/{product_id}",
+    response_model=ProductResponse
+)
+def update_product(
+    product_id: int,
+    product_data: ProductUpdate,
+    db: Session = Depends(get_db)
+):
+    try:
+        stmt = select(Product).where(
+            Product.id == product_id
+        )
+
+        result = db.execute(stmt)
+
+        product = result.scalar_one_or_none()
+
+        if product is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Product not found"
+            )
+
+        update_data = product_data.model_dump(
+            exclude_unset=True
+        )
+
+        if "category" in update_data:
+            category_stmt = select(Category).where(
+                Category.name == update_data["category"]
+            )
+
+            category = db.execute(
+                category_stmt
+            ).scalar_one_or_none()
+
+            if category is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Category not found"
+                )
+
+            product.category_id = category.id
+
+            del update_data["category"]
+
+        for field, value in update_data.items():
+            setattr(product, field, value)
+
+        db.commit()
+        db.refresh(product)
+
+        return product
+
+    except SQLAlchemyError:
+        db.rollback()
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"

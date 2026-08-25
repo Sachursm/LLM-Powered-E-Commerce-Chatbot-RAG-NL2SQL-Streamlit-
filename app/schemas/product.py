@@ -22,3 +22,12 @@ class ProductCreate(BaseModel):
     stock: int
     image_url: str
     category: str
+
+class ProductUpdate(BaseModel):
+    source_product_id: int | None = None
+    name: str | None = None
+    description: str | None = None
+    price: float | None = None
+    stock: int | None = None
+    image_url: str | None = None
+    category: str | None = None
