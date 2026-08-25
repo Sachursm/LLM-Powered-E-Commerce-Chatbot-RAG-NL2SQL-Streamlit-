@@ -19,7 +19,7 @@ def get_categories(
     db: Session = Depends(get_db)
 ):
     try:
-        stmt = select(Category)
+        stmt = select(Category).order_by(Category.name)
 
         result = db.execute(stmt)
 
