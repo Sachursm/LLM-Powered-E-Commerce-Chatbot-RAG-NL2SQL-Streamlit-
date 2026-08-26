@@ -11,7 +11,9 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate
 )
- 
+
+from app.core.security import require_admin
+from app.database.models.user import User
  
 router = APIRouter(
     prefix="/products",
@@ -91,7 +93,8 @@ def get_product(
 )
 def create_product(
     product_data: ProductCreate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
 ):
     try:
         category_stmt = select(Category).where(
@@ -137,7 +140,8 @@ def create_product(
 def update_product(
     product_id: int,
     product_data: ProductUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
 ):
     try:
         stmt = select(Product).where(
@@ -199,7 +203,8 @@ def update_product(
 )
 def delete_product(
     product_id: int,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
 ):
     try:
         stmt = select(Product).where(
