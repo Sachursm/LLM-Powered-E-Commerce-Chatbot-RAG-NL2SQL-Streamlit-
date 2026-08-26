@@ -9,6 +9,7 @@ chromadb
 semantic-router[local]
 sentence_transformers
 pydantic
+pydantic[email]
 PyJWT
 sqlalchemy
 pydantic-settings
