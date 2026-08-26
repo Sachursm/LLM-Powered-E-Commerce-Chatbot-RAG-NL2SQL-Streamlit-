@@ -14,3 +14,4 @@ sqlalchemy
 pydantic-settings
 alembic
 pwdlib[argon2]
+python-multipart
