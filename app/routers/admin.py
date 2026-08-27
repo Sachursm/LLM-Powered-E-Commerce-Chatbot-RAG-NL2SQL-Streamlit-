@@ -8,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.core.security import require_admin
 from app.database.dependencies import get_db
 from app.database.models.user import User
+from app.database.models.audit_log import AuditLog
 from app.schemas.user import UserResponse, RoleUpdate
 
 
@@ -81,8 +82,21 @@ def update_user_role(
                 )
 
 
+        old_role = user.role
+
         user.role = role_data.role
         user.updated_at = datetime.utcnow()
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=user.id,
+            action="ROLE_CHANGED",
+            old_value=old_role,
+            new_value=role_data.role
+        )
+
+        db.add(audit_log)
 
         db.commit()
         db.refresh(user)
@@ -139,8 +153,22 @@ def deactivate_user(
                     detail="Cannot deactivate the last active admin"
                 )
 
+        old_status = user.status
+
         user.status = "INACTIVE"
         user.deactivated_at = datetime.utcnow()
+        user.updated_at = datetime.utcnow()
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=user.id,
+            action="USER_DEACTIVATED",
+            old_value=old_status,
+            new_value="INACTIVE"
+        )
+
+        db.add(audit_log)
 
         db.commit()
         db.refresh(user)
@@ -183,8 +211,22 @@ def activate_user(
                 detail="User is already active"
             )
 
+        old_status = user.status
+
         user.status = "ACTIVE"
         user.deactivated_at = None
+        user.updated_at = datetime.utcnow()
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=user.id,
+            action="USER_ACTIVATED",
+            old_value=old_status,
+            new_value="ACTIVE"
+        )
+
+        db.add(audit_log)
 
         db.commit()
         db.refresh(user)

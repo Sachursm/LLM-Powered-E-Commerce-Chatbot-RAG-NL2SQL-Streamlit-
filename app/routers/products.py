@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database.dependencies import get_db
 from app.database.models.category import Category
 from app.database.models.product import Product
+from app.database.models.audit_log import AuditLog
 from app.schemas.product import (
     ProductCreate,
     ProductResponse,
@@ -118,13 +119,23 @@ def create_product(
             image_url=product_data.image_url,
             category_id=category.id
         )
- 
         db.add(product)
         db.commit()
         db.refresh(product)
- 
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="PRODUCT",
+            target_id=product.id,
+            action="PRODUCT_CREATED",
+            old_value=None,
+            new_value=product.name
+        )
+
+        db.add(audit_log)
+        db.commit()
+
         return product
- 
     except SQLAlchemyError:
         db.rollback()
  
@@ -182,7 +193,21 @@ def update_product(
             del update_data["category"]
 
         for field, value in update_data.items():
+
+            old_value = getattr(product, field)
+
             setattr(product, field, value)
+
+            audit_log = AuditLog(
+                actor_user_id=current_user.id,
+                target_type="PRODUCT",
+                target_id=product.id,
+                action=f"{field.upper()}_CHANGED",
+                old_value=str(old_value),
+                new_value=str(value)
+            )
+
+            db.add(audit_log)
 
         db.commit()
         db.refresh(product)
@@ -220,6 +245,17 @@ def delete_product(
                 status_code=404,
                 detail="Product not found"
             )
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="PRODUCT",
+            target_id=product.id,
+            action="PRODUCT_DELETED",
+            old_value=product.name,
+            new_value=None
+        )
+
+        db.add(audit_log)
 
         db.delete(product)
         db.commit()
