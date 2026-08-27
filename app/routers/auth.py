@@ -71,7 +71,7 @@ def register(
             username=user_data.username,
             email=user_data.email,
             password_hash=password_hash,
-            role="user"
+            role="USER"
         )
 
         db.add(user)

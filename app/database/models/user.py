@@ -1,11 +1,14 @@
-from sqlalchemy import String
+from datetime import datetime
+
+from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from app.database.database import Base
+
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.database.models.order import Order
-
-from app.database.database import Base
 
 
 class User(Base):
@@ -25,11 +28,38 @@ class User(Base):
         index=True
     )
 
-    password_hash: Mapped[str] = mapped_column(String(255))
+    password_hash: Mapped[str] = mapped_column(
+        String(255)
+    )
 
     role: Mapped[str] = mapped_column(
         String(20),
-        default="user"
+        default="USER",
+        nullable=False
+    )
+
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="ACTIVE",
+        nullable=False
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        nullable=False
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False
+    )
+
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
     )
 
     orders: Mapped[list["Order"]] = relationship(

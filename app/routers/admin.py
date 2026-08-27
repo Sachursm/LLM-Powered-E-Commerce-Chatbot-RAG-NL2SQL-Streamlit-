@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Literal
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,10 +18,16 @@ router = APIRouter(
 
 @router.get("/users", response_model=list[UserResponse])
 def get_users(
+    role: Literal["USER", "SELLER", "ADMIN"] | None = Query(
+        default=None
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     stmt = select(User)
+
+    if role is not None:
+        stmt = stmt.where(User.role == role)
 
     result = db.execute(stmt)
 
@@ -48,7 +55,7 @@ def update_user_role(
                 detail="User not found"
             )
 
-        if role_data.role not in ["user", "seller", "admin"]:
+        if role_data.role not in ["USER", "SELLER", "ADMIN"]:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid role"
