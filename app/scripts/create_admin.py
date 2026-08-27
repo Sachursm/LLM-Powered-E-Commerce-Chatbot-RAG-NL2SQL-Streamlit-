@@ -19,7 +19,7 @@ def create_admin():
 
     try:
         existing_admin = db.execute(
-            select(User).where(User.role == "admin")
+            select(User).where(User.role == "ADMIN")
         ).scalar_one_or_none()
 
         if existing_admin is not None:
@@ -50,7 +50,8 @@ def create_admin():
             username=username,
             email=email,
             password_hash=hash_password(password),
-            role="admin"
+            role="ADMIN",
+            status="ACTIVE"
         )
 
         db.add(admin)
