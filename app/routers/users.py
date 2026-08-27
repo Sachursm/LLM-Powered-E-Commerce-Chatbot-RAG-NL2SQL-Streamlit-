@@ -15,7 +15,7 @@ from app.core.security import (
     get_current_user,
     verify_password,
     hash_password
-)
+    )
 
 router = APIRouter(
     prefix="/users",
@@ -138,3 +138,4 @@ def change_password(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
+

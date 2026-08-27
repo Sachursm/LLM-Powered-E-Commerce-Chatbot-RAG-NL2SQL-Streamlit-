@@ -1,4 +1,5 @@
 from typing import Literal
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -61,7 +62,129 @@ def update_user_role(
                 detail="Invalid role"
             )
 
+        if (
+            user.role == "ADMIN"
+            and user.status == "ACTIVE"
+            and role_data.role != "ADMIN"
+        ):
+            active_admin_count = db.execute(
+                select(User).where(
+                    User.role == "ADMIN",
+                    User.status == "ACTIVE"
+                )
+            ).scalars().all()
+
+            if len(active_admin_count) == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot remove the last active admin"
+                )
+
+
         user.role = role_data.role
+        user.updated_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(user)
+
+        return user
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+@router.patch(
+    "/users/{user_id}/deactivate",
+    response_model=UserResponse
+)
+def deactivate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+        stmt = select(User).where(User.id == user_id)
+
+        result = db.execute(stmt)
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        if user.status == "INACTIVE":
+            raise HTTPException(
+                status_code=400,
+                detail="User is already inactive"
+            )
+
+        if user.role == "ADMIN":
+            active_admin_count = db.execute(
+                select(User).where(
+                    User.role == "ADMIN",
+                    User.status == "ACTIVE"
+                )
+            ).scalars().all()
+
+            if len(active_admin_count) == 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Cannot deactivate the last active admin"
+                )
+
+        user.status = "INACTIVE"
+        user.deactivated_at = datetime.utcnow()
+
+        db.commit()
+        db.refresh(user)
+
+        return user
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+@router.patch(
+    "/users/{user_id}/activate",
+    response_model=UserResponse
+)
+def activate_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+        stmt = select(User).where(User.id == user_id)
+
+        result = db.execute(stmt)
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        if user.status == "ACTIVE":
+            raise HTTPException(
+                status_code=400,
+                detail="User is already active"
+            )
+
+        user.status = "ACTIVE"
+        user.deactivated_at = None
 
         db.commit()
         db.refresh(user)
