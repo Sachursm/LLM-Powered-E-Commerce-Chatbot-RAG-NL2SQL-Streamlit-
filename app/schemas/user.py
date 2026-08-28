@@ -1,4 +1,5 @@
 from pydantic import BaseModel, EmailStr
+from datetime import datetime
 
 
 class UserCreate(BaseModel):
@@ -29,3 +30,12 @@ class RoleUpdate(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str
+
+class ReactivationRequestResponse(BaseModel):
+    id: int
+    user_id: int
+    email: EmailStr
+    status: str
+    created_at: datetime
+    reviewed_at: datetime | None = None
+    reviewed_by: int | None = None

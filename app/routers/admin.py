@@ -10,6 +10,8 @@ from app.database.dependencies import get_db
 from app.database.models.user import User
 from app.database.models.audit_log import AuditLog
 from app.schemas.user import UserResponse, RoleUpdate
+from app.database.models.reactivation_request import ReactivationRequest
+from app.schemas.user import ReactivationRequestResponse
 
 
 router = APIRouter(
@@ -232,6 +234,180 @@ def activate_user(
         db.refresh(user)
 
         return user
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+@router.get(
+"/reactivation-requests",
+response_model=list[ReactivationRequestResponse]
+)
+def get_reactivation_requests(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+        stmt = (
+            select(ReactivationRequest)
+            .where(ReactivationRequest.status == "PENDING")
+            .order_by(ReactivationRequest.created_at)
+        )
+
+        requests = db.execute(stmt).scalars().all()
+
+        return requests
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+@router.post("/reactivation-requests/{request_id}/approve")
+def approve_reactivation_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+        # Find the reactivation request
+        stmt = select(ReactivationRequest).where(
+            ReactivationRequest.id == request_id
+        )
+
+        request = db.execute(stmt).scalar_one_or_none()
+
+        if request is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Reactivation request not found"
+            )
+
+        # Make sure it has not already been reviewed
+        if request.status != "PENDING":
+            raise HTTPException(
+                status_code=409,
+                detail="Reactivation request has already been reviewed"
+            )
+
+        # Find the user
+        user_stmt = select(User).where(
+            User.id == request.user_id
+        )
+
+        user = db.execute(user_stmt).scalar_one_or_none()
+
+        if user is None:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Reactivate the user
+        user.status = "ACTIVE"
+        user.deactivated_at = None
+
+        # Update the request
+        request.status = "APPROVED"
+        request.reviewed_at = datetime.utcnow()
+        request.reviewed_by = current_user.id
+
+        # Create audit log
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=user.id,
+            action="USER_REACTIVATED",
+            old_value="INACTIVE",
+            new_value="ACTIVE"
+        )
+
+        db.add(audit_log)
+
+        # One transaction
+        db.commit()
+
+        return {
+            "message": "User account reactivated successfully"
+        }
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+@router.post("/reactivation-requests/{request_id}/reject")
+def reject_reactivation_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+        # Find the reactivation request
+        stmt = select(ReactivationRequest).where(
+            ReactivationRequest.id == request_id
+        )
+
+        request = db.execute(stmt).scalar_one_or_none()
+
+        if request is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Reactivation request not found"
+            )
+
+        # Make sure the request is still pending
+        if request.status != "PENDING":
+            raise HTTPException(
+                status_code=409,
+                detail="Reactivation request has already been reviewed"
+            )
+
+        # Find the user
+        user_stmt = select(User).where(
+            User.id == request.user_id
+        )
+
+        user = db.execute(user_stmt).scalar_one_or_none()
+
+        if user is None:
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # Reject the request
+        request.status = "REJECTED"
+        request.reviewed_at = datetime.utcnow()
+        request.reviewed_by = current_user.id
+
+        # Create audit log
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=user.id,
+            action="USER_REACTIVATION_REJECTED",
+            old_value="INACTIVE",
+            new_value="INACTIVE"
+        )
+
+        db.add(audit_log)
+
+        db.commit()
+
+        return {
+            "message": "Reactivation request rejected successfully"
+        }
 
     except SQLAlchemyError:
         db.rollback()

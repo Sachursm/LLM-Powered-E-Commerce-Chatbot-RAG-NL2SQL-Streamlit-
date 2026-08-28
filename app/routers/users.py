@@ -2,8 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from datetime import datetime
 
-from app.core.security import get_current_user
 from app.database.dependencies import get_db
 from app.database.models.user import User
 from app.schemas.user import (
@@ -12,10 +12,14 @@ from app.schemas.user import (
     ChangePassword
 )
 from app.core.security import (
-    get_current_user,
+    require_active_user,
     verify_password,
-    hash_password
+    hash_password,
+    get_current_user
     )
+
+from app.database.models.reactivation_request import ReactivationRequest
+from app.database.models.audit_log import AuditLog
 
 router = APIRouter(
     prefix="/users",
@@ -26,7 +30,7 @@ router = APIRouter(
 def update_my_profile(
     user_data: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_active_user)
 ):
     try:
         if not verify_password(
@@ -97,7 +101,7 @@ def update_my_profile(
 def change_password(
     password_data: ChangePassword,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_active_user)
 ):
     try:
         # Verify the current password
@@ -138,4 +142,106 @@ def change_password(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
+
+
+
+@router.patch("/me/deactivate")
+def deactivate_my_account(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_user)
+):
+    try:
+        current_user.status = "INACTIVE"
+        current_user.deactivated_at = datetime.utcnow()
+
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=current_user.id,
+            action="USER_DEACTIVATED",
+            old_value="ACTIVE",
+            new_value="INACTIVE"
+        )
+
+        db.add(audit_log)
+
+        db.commit()
+
+        return {
+            "message": "Account deactivated successfully"
+        }
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+@router.post("/me/reactivation-request")
+def request_reactivation(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    try:
+        # User must be inactive to request reactivation
+        if current_user.status == "ACTIVE":
+            raise HTTPException(
+                status_code=400,
+                detail="Your account is already active"
+            )
+
+        # Check for an existing pending request
+        existing_request = db.execute(
+            select(ReactivationRequest).where(
+                ReactivationRequest.user_id == current_user.id,
+                ReactivationRequest.status == "PENDING"
+            )
+        ).scalar_one_or_none()
+
+        if existing_request is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="A reactivation request is already pending"
+            )
+
+        # Create reactivation request
+        reactivation_request = ReactivationRequest(
+            user_id=current_user.id,
+            email=current_user.email,
+            status="PENDING"
+        )
+
+        db.add(reactivation_request)
+        db.flush()
+
+        # Create audit log
+        audit_log = AuditLog(
+            actor_user_id=current_user.id,
+            target_type="USER",
+            target_id=current_user.id,
+            action="USER_REACTIVATION_REQUESTED",
+            old_value="INACTIVE",
+            new_value="PENDING"
+        )
+
+        db.add(audit_log)
+
+        db.commit()
+
+        return {
+            "message": "Reactivation request submitted successfully",
+            "status": "PENDING"
+        }
+
+    except SQLAlchemyError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
 
