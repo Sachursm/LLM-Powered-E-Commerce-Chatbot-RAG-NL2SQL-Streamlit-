@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.database.models.category import Category
+    from app.database.models.seller_product import SellerProduct
 
 from app.database.database import Base
 
@@ -54,5 +55,10 @@ class Product(Base):
     )
 
     category: Mapped["Category"] = relationship(
-        back_populates="products"
+    back_populates="products"
+    )
+
+    seller_products: Mapped[list["SellerProduct"]] = relationship(
+        back_populates="product",
+        cascade="all, delete-orphan"
     )

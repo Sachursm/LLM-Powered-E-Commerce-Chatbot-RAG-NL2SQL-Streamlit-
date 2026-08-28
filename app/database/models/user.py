@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from app.database.models.order import Order
+    from app.database.models.seller_product import SellerProduct
 
 
 class User(Base):
@@ -64,4 +65,10 @@ class User(Base):
 
     orders: Mapped[list["Order"]] = relationship(
         back_populates="user"
+    )
+
+
+    seller_products: Mapped[list["SellerProduct"]] = relationship(
+    back_populates="seller",
+    cascade="all, delete-orphan"
     )

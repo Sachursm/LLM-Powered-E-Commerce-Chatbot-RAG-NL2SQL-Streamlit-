@@ -163,3 +163,21 @@ def require_admin_or_seller(
         )
 
     return current_user
+
+def require_seller(
+    current_user: User = Depends(get_current_user)
+) -> User:
+
+    if current_user.status != "ACTIVE":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    if current_user.role != "SELLER":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seller access required"
+        )
+
+    return current_user

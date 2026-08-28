@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database.dependencies import get_db
 from app.database.models.user import User
+from app.schemas.seller import SellerCreate, SellerResponse
 from app.schemas.user import (
     UserCreate, 
     UserResponse, 
@@ -131,6 +132,68 @@ def login(
         }
 
     except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+@router.post(
+    "/register-seller",
+    response_model=SellerResponse,
+    status_code=status.HTTP_201_CREATED
+)
+def register_seller(
+    seller_data: SellerCreate,
+    db: Session = Depends(get_db)
+):
+    try:
+        # Check username
+        existing_username = db.execute(
+            select(User).where(
+                User.username == seller_data.username
+            )
+        ).scalar_one_or_none()
+
+        if existing_username is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Username already exists"
+            )
+
+        # Check email
+        existing_email = db.execute(
+            select(User).where(
+                User.email == seller_data.email
+            )
+        ).scalar_one_or_none()
+
+        if existing_email is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Email already exists"
+            )
+
+        # Create seller
+        seller = User(
+            username=seller_data.username,
+            email=seller_data.email,
+            password_hash=hash_password(seller_data.password),
+            role="SELLER",
+            status="ACTIVE"
+        )
+
+        db.add(seller)
+        db.commit()
+        db.refresh(seller)
+
+        return seller
+
+    except SQLAlchemyError as e:
+        db.rollback()
+
+        print("DATABASE ERROR:", e)
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
