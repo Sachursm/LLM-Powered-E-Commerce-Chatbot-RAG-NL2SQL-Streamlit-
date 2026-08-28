@@ -41,6 +41,37 @@ def get_categories(
             detail="Database service temporarily unavailable"
         )
 
+@router.get(
+    "/by-name/{category_name}",
+    response_model=CategoryResponse
+)
+def get_category_by_name(
+    category_name: str,
+    db: Session = Depends(get_db)
+):
+    try:
+        stmt = select(Category).where(
+            Category.name == category_name
+        )
+
+        category = db.execute(
+            stmt
+        ).scalar_one_or_none()
+
+        if category is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Category not found"
+            )
+
+        return category
+
+    except SQLAlchemyError:
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
 @router.post("/", response_model=CategoryResponse, status_code=201)
 def create_category(
     category_data: CategoryCreate,
