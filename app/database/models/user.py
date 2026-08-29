@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from app.database.models.order import Order
     from app.database.models.seller_product import SellerProduct
+    from app.database.models.cart import Cart
+    from app.database.models.cart_item import CartItem
 
 
 class User(Base):
@@ -72,3 +74,11 @@ class User(Base):
     back_populates="seller",
     cascade="all, delete-orphan"
     )
+
+    cart: Mapped["Cart"] = relationship(
+    back_populates="user",
+    uselist=False,
+    cascade="all, delete-orphan"
+    )
+
+    

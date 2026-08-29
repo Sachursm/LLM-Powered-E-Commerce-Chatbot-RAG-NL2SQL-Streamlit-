@@ -6,3 +6,5 @@ from app.database.models.order_item import OrderItem
 from app.database.models.audit_log import AuditLog
 from app.database.models.reactivation_request import ReactivationRequest
 from app.database.models.seller_product import SellerProduct
+from app.database.models.cart import Cart
+from app.database.models.cart_item import CartItem  
