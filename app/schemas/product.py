@@ -12,6 +12,7 @@ class ProductResponse(BaseModel):
     rating: float | None
     ratings_count: int | None
     category_id: int
+    seller_id: int
 
 
 class ProductCreate(BaseModel):
@@ -22,6 +23,7 @@ class ProductCreate(BaseModel):
     stock: int
     image_url: str
     category: str
+    seller_id: int
 
 class ProductUpdate(BaseModel):
     source_product_id: int | None = None

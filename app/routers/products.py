@@ -12,6 +12,7 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate
 )
+from app.database.models.seller_product import SellerProduct
 
 from app.core.security import require_admin
 from app.database.models.user import User
@@ -30,35 +31,55 @@ def get_products(
     db: Session = Depends(get_db)
 ):
     try:
-        stmt = select(Product)
- 
+        stmt = (
+            select(Product, SellerProduct.seller_id)
+            .join(
+                SellerProduct,
+                SellerProduct.product_id == Product.id
+            )
+        )
+
         if category is not None:
             stmt = stmt.join(Category).where(
                 Category.name == category
             )
- 
+
         if min_price is not None:
             stmt = stmt.where(
                 Product.price >= min_price
             )
- 
+
         if max_price is not None:
             stmt = stmt.where(
                 Product.price <= max_price
             )
- 
+
         result = db.execute(stmt)
- 
-        products = result.scalars().all()
- 
-        return products
- 
+
+        products = result.all()
+
+        return [
+            ProductResponse(
+                id=product.id,
+                source_product_id=product.source_product_id,
+                name=product.name,
+                description=product.description,
+                price=product.price,
+                stock=product.stock,
+                image_url=product.image_url,
+                rating=product.rating,
+                ratings_count=product.ratings_count,
+                category_id=product.category_id,
+                seller_id=seller_id
+            )
+            for product, seller_id in products
+        ]
+
     except SQLAlchemyError:
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
- 
  
 @router.get("/{product_id}", response_model=ProductResponse)
 def get_product(
@@ -66,26 +87,46 @@ def get_product(
     db: Session = Depends(get_db)
 ):
     try:
-        stmt = select(Product).where(Product.id == product_id)
- 
+        stmt = (
+            select(Product, SellerProduct.seller_id)
+            .join(
+                SellerProduct,
+                SellerProduct.product_id == Product.id
+            )
+            .where(Product.id == product_id)
+        )
+
         result = db.execute(stmt)
- 
-        product = result.scalar_one_or_none()
- 
-        if product is None:
+
+        row = result.one_or_none()
+
+        if row is None:
             raise HTTPException(
                 status_code=404,
                 detail="Product not found"
             )
- 
-        return product
- 
+
+        product, seller_id = row
+
+        return ProductResponse(
+            id=product.id,
+            source_product_id=product.source_product_id,
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock,
+            image_url=product.image_url,
+            rating=product.rating,
+            ratings_count=product.ratings_count,
+            category_id=product.category_id,
+            seller_id=seller_id
+        )
+
     except SQLAlchemyError:
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
- 
  
 @router.post(
     "/",
@@ -101,15 +142,18 @@ def create_product(
         category_stmt = select(Category).where(
             Category.name == product_data.category
         )
- 
-        category = db.execute(category_stmt).scalar_one_or_none()
- 
+
+        category = db.execute(
+            category_stmt
+        ).scalar_one_or_none()
+
         if category is None:
             raise HTTPException(
                 status_code=404,
                 detail="Category not found"
             )
- 
+
+        # Create product
         product = Product(
             source_product_id=product_data.source_product_id,
             name=product_data.name,
@@ -119,10 +163,19 @@ def create_product(
             image_url=product_data.image_url,
             category_id=category.id
         )
-        db.add(product)
-        db.commit()
-        db.refresh(product)
 
+        db.add(product)
+        db.flush()
+
+        # Connect product to the admin/seller
+        seller_product = SellerProduct(
+            seller_id=current_user.id,
+            product_id=product.id
+        )
+
+        db.add(seller_product)
+
+        # Audit log
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="PRODUCT",
@@ -133,12 +186,27 @@ def create_product(
         )
 
         db.add(audit_log)
-        db.commit()
 
-        return product
+        db.commit()
+        db.refresh(product)
+
+        return ProductResponse(
+            id=product.id,
+            source_product_id=product.source_product_id,
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock,
+            image_url=product.image_url,
+            rating=product.rating,
+            ratings_count=product.ratings_count,
+            category_id=product.category_id,
+            seller_id=current_user.id
+        )
+
     except SQLAlchemyError:
         db.rollback()
- 
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"

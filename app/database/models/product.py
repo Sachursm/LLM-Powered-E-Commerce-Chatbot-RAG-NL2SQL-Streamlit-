@@ -15,7 +15,6 @@ class Product(Base):
     id: Mapped[int] = mapped_column(primary_key = True)
 
     source_product_id: Mapped[int | None] = mapped_column(
-    unique=True,
     index=True,
     nullable=True
     )
