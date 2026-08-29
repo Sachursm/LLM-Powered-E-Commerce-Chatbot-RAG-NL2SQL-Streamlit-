@@ -7,6 +7,7 @@ from app.routers.test_auth import router as test_auth_router
 from app.routers.users import router as user_router
 from app.routers.admin import router as admin_router
 from app.routers.seller import router as seller_router
+from app.routers.cart import router as cart_router
 
 app = FastAPI(
     title="E-Commerce API",
@@ -26,5 +27,6 @@ app.include_router(test_auth_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(seller_router)
+app.include_router(cart_router)
 
 
