@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db
 from app.database.models.category import Category
@@ -22,15 +22,27 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=list[CategoryResponse])
-def get_categories(
-    db: Session = Depends(get_db)
+# ---------------------------------------------------------
+# GET ALL CATEGORIES
+# ---------------------------------------------------------
+# Returns all categories ordered alphabetically by name.
+# This endpoint does not require authentication.
+# ---------------------------------------------------------
+
+@router.get(
+    "/",
+    response_model=list[CategoryResponse]
+)
+async def get_categories(
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         stmt = select(Category).order_by(Category.name)
 
-        result = db.execute(stmt)
+        # Execute the query asynchronously
+        result = await db.execute(stmt)
 
+        # Convert the result into Category objects
         categories = result.scalars().all()
 
         return categories
@@ -41,22 +53,30 @@ def get_categories(
             detail="Database service temporarily unavailable"
         )
 
+
+# ---------------------------------------------------------
+# GET CATEGORY BY NAME
+# ---------------------------------------------------------
+# Allows the user to request a category using its name.
+# ---------------------------------------------------------
+
 @router.get(
     "/by-name/{category_name}",
     response_model=CategoryResponse
 )
-def get_category_by_name(
+async def get_category_by_name(
     category_name: str,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         stmt = select(Category).where(
             Category.name == category_name
         )
 
-        category = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        # Execute query asynchronously
+        result = await db.execute(stmt)
+
+        category = result.scalar_one_or_none()
 
         if category is None:
             raise HTTPException(
@@ -72,20 +92,35 @@ def get_category_by_name(
             detail="Database service temporarily unavailable"
         )
 
-@router.post("/", response_model=CategoryResponse, status_code=201)
-def create_category(
+
+# ---------------------------------------------------------
+# CREATE CATEGORY
+# ---------------------------------------------------------
+# Only ADMIN or SELLER can create a category.
+#
+# We first check whether a category with the same name
+# already exists.
+# ---------------------------------------------------------
+
+@router.post(
+    "/",
+    response_model=CategoryResponse,
+    status_code=201
+)
+async def create_category(
     category_data: CategoryCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller)
 ):
     try:
+        # Check whether the category already exists
         stmt = select(Category).where(
             Category.name == category_data.name
         )
 
-        existing_category = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+
+        existing_category = result.scalar_one_or_none()
 
         if existing_category is not None:
             raise HTTPException(
@@ -93,13 +128,18 @@ def create_category(
                 detail="Category already exists"
             )
 
+        # Create the category
         category = Category(
             name=category_data.name
         )
 
         db.add(category)
-        db.flush()
 
+        # Flush so that category.id is generated
+        # before creating the audit log.
+        await db.flush()
+
+        # Record who created the category
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="CATEGORY",
@@ -111,37 +151,51 @@ def create_category(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(category)
+        # Save category and audit log together
+        await db.commit()
+
+        # Refresh category with the database-generated values
+        await db.refresh(category)
 
         return category
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# ---------------------------------------------------------
+# UPDATE CATEGORY
+# ---------------------------------------------------------
+# Only ADMIN or SELLER can update a category.
+#
+# A category name cannot be changed to a name that is
+# already being used by another category.
+# ---------------------------------------------------------
+
 @router.patch(
     "/{category_id}",
     response_model=CategoryResponse
 )
-def update_category(
+async def update_category(
     category_id: int,
     category_data: CategoryUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller)
 ):
     try:
+        # Find the category being updated
         stmt = select(Category).where(
             Category.id == category_id
         )
 
-        category = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+
+        category = result.scalar_one_or_none()
 
         if category is None:
             raise HTTPException(
@@ -149,14 +203,18 @@ def update_category(
                 detail="Category not found"
             )
 
+        # Check whether another category already uses
+        # the requested name.
         existing_stmt = select(Category).where(
             Category.name == category_data.name,
             Category.id != category_id
         )
 
-        existing_category = db.execute(
+        existing_result = await db.execute(
             existing_stmt
-        ).scalar_one_or_none()
+        )
+
+        existing_category = existing_result.scalar_one_or_none()
 
         if existing_category is not None:
             raise HTTPException(
@@ -164,10 +222,13 @@ def update_category(
                 detail="Category name already exists"
             )
 
+        # Keep the old name for the audit log
         old_name = category.name
 
+        # Update category name
         category.name = category_data.name
 
+        # Record the change
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="CATEGORY",
@@ -179,36 +240,49 @@ def update_category(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(category)
+        # Save both changes
+        await db.commit()
+
+        await db.refresh(category)
 
         return category
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# ---------------------------------------------------------
+# DELETE CATEGORY
+# ---------------------------------------------------------
+# Only ADMIN or SELLER can delete a category.
+#
+# A category cannot be deleted if any product is currently
+# using that category.
+# ---------------------------------------------------------
+
 @router.delete(
     "/{category_id}",
     status_code=204
 )
-def delete_category(
+async def delete_category(
     category_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller)
 ):
     try:
+        # Find the category
         stmt = select(Category).where(
             Category.id == category_id
         )
 
-        category = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+
+        category = result.scalar_one_or_none()
 
         if category is None:
             raise HTTPException(
@@ -216,13 +290,16 @@ def delete_category(
                 detail="Category not found"
             )
 
+        # Check whether products are using this category
         product_stmt = select(Product).where(
             Product.category_id == category_id
         )
 
-        products = db.execute(
+        product_result = await db.execute(
             product_stmt
-        ).scalars().all()
+        )
+
+        products = product_result.scalars().all()
 
         if products:
             raise HTTPException(
@@ -230,6 +307,7 @@ def delete_category(
                 detail="Cannot delete category because products are using it"
             )
 
+        # Record deletion in the audit log
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="CATEGORY",
@@ -241,12 +319,14 @@ def delete_category(
 
         db.add(audit_log)
 
-        db.delete(category)
+        # Delete the category
+        await db.delete(category)
 
-        db.commit()
+        # Save deletion and audit log
+        await db.commit()
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,

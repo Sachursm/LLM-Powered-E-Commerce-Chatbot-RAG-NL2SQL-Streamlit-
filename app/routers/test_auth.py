@@ -4,7 +4,9 @@ from app.core.security import (
     get_current_user,
     require_admin
 )
+
 from app.database.models.user import User
+
 
 router = APIRouter(
     prefix="/test-auth",
@@ -13,7 +15,7 @@ router = APIRouter(
 
 
 @router.get("/me")
-def get_me(
+async def get_me(
     current_user: User = Depends(get_current_user)
 ):
     return {
@@ -23,8 +25,9 @@ def get_me(
         "role": current_user.role
     }
 
+
 @router.get("/admin")
-def admin_test(
+async def admin_test(
     current_user: User = Depends(require_admin)
 ):
     return {

@@ -1,13 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db
 from app.database.models.cart import Cart
 from app.database.models.cart_item import CartItem
 from app.database.models.product import Product
 from app.database.models.user import User
+
 from app.schemas.cart import CartResponse
 from app.schemas.cart_item import (
     CartItemCreate,
@@ -29,20 +30,19 @@ router = APIRouter(
     response_model=CartItemResponse,
     status_code=status.HTTP_201_CREATED
 )
-def add_cart_item(
+async def add_cart_item(
     item_data: CartItemCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Check product exists
+        # Check whether the requested product exists.
         product_stmt = select(Product).where(
             Product.id == item_data.product_id
         )
 
-        product = db.execute(
-            product_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(product_stmt)
+        product = result.scalar_one_or_none()
 
         if product is None:
             raise HTTPException(
@@ -50,52 +50,49 @@ def add_cart_item(
                 detail="Product not found"
             )
 
-        # Validate quantity
+        # Quantity must always be greater than zero.
         if item_data.quantity <= 0:
             raise HTTPException(
                 status_code=400,
                 detail="Quantity must be greater than 0"
             )
 
-        # Find user's cart
+        # Find the current user's cart.
         cart_stmt = select(Cart).where(
             Cart.user_id == current_user.id
         )
 
-        cart = db.execute(
-            cart_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(cart_stmt)
+        cart = result.scalar_one_or_none()
 
-        # Create cart if it doesn't exist
+        # Create a cart automatically if the user does not have one.
         if cart is None:
             cart = Cart(
                 user_id=current_user.id
             )
 
             db.add(cart)
-            db.flush()
+            await db.flush()
 
-        # Check whether product is already in cart
+        # Check whether this product is already in the cart.
         existing_stmt = select(CartItem).where(
             CartItem.cart_id == cart.id,
             CartItem.product_id == item_data.product_id
         )
 
-        existing_item = db.execute(
-            existing_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(existing_stmt)
+        existing_item = result.scalar_one_or_none()
 
-        # If already exists, increase quantity
+        # If the product already exists, increase its quantity.
         if existing_item is not None:
-
             existing_item.quantity += item_data.quantity
 
-            db.commit()
-            db.refresh(existing_item)
+            await db.commit()
+            await db.refresh(existing_item)
 
             return existing_item
 
-        # Create new cart item
+        # Otherwise create a new cart item.
         cart_item = CartItem(
             cart_id=cart.id,
             product_id=item_data.product_id,
@@ -104,13 +101,13 @@ def add_cart_item(
 
         db.add(cart_item)
 
-        db.commit()
-        db.refresh(cart_item)
+        await db.commit()
+        await db.refresh(cart_item)
 
         return cart_item
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -122,18 +119,18 @@ def add_cart_item(
     "",
     response_model=CartResponse
 )
-def get_cart(
-    db: Session = Depends(get_db),
+async def get_cart(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
+        # Find the cart belonging to the current user.
         stmt = select(Cart).where(
             Cart.user_id == current_user.id
         )
 
-        cart = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+        cart = result.scalar_one_or_none()
 
         if cart is None:
             raise HTTPException(
@@ -154,28 +151,27 @@ def get_cart(
     "/items/{item_id}",
     response_model=CartItemResponse
 )
-def update_cart_item(
+async def update_cart_item(
     item_id: int,
     item_data: CartItemUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Validate quantity
+        # Quantity must be greater than zero.
         if item_data.quantity <= 0:
             raise HTTPException(
                 status_code=400,
                 detail="Quantity must be greater than 0"
             )
 
-        # Find current user's cart
+        # Find the current user's cart.
         cart_stmt = select(Cart).where(
             Cart.user_id == current_user.id
         )
 
-        cart = db.execute(
-            cart_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(cart_stmt)
+        cart = result.scalar_one_or_none()
 
         if cart is None:
             raise HTTPException(
@@ -183,15 +179,14 @@ def update_cart_item(
                 detail="Cart not found"
             )
 
-        # Find item inside user's cart
+        # Find the requested item inside the user's own cart.
         item_stmt = select(CartItem).where(
             CartItem.id == item_id,
             CartItem.cart_id == cart.id
         )
 
-        cart_item = db.execute(
-            item_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(item_stmt)
+        cart_item = result.scalar_one_or_none()
 
         if cart_item is None:
             raise HTTPException(
@@ -199,15 +194,16 @@ def update_cart_item(
                 detail="Cart item not found"
             )
 
+        # Replace the existing quantity with the new quantity.
         cart_item.quantity = item_data.quantity
 
-        db.commit()
-        db.refresh(cart_item)
+        await db.commit()
+        await db.refresh(cart_item)
 
         return cart_item
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -219,20 +215,19 @@ def update_cart_item(
     "/items/{item_id}",
     status_code=status.HTTP_204_NO_CONTENT
 )
-def delete_cart_item(
+async def delete_cart_item(
     item_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Find current user's cart
+        # Find the current user's cart.
         cart_stmt = select(Cart).where(
             Cart.user_id == current_user.id
         )
 
-        cart = db.execute(
-            cart_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(cart_stmt)
+        cart = result.scalar_one_or_none()
 
         if cart is None:
             raise HTTPException(
@@ -240,15 +235,14 @@ def delete_cart_item(
                 detail="Cart not found"
             )
 
-        # Find item inside user's cart
+        # Make sure the item belongs to this user's cart.
         item_stmt = select(CartItem).where(
             CartItem.id == item_id,
             CartItem.cart_id == cart.id
         )
 
-        cart_item = db.execute(
-            item_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(item_stmt)
+        cart_item = result.scalar_one_or_none()
 
         if cart_item is None:
             raise HTTPException(
@@ -256,35 +250,36 @@ def delete_cart_item(
                 detail="Cart item not found"
             )
 
-        db.delete(cart_item)
+        # Delete the selected cart item.
+        await db.delete(cart_item)
 
-        db.commit()
+        await db.commit()
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
 @router.delete(
     "",
     status_code=status.HTTP_204_NO_CONTENT
 )
-def clear_cart(
-    db: Session = Depends(get_db),
+async def clear_cart(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Find current user's cart
+        # Find the current user's cart.
         cart_stmt = select(Cart).where(
             Cart.user_id == current_user.id
         )
 
-        cart = db.execute(
-            cart_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(cart_stmt)
+        cart = result.scalar_one_or_none()
 
         if cart is None:
             raise HTTPException(
@@ -292,23 +287,22 @@ def clear_cart(
                 detail="Cart not found"
             )
 
-        # Find all items in the cart
+        # Find all items belonging to this cart.
         items_stmt = select(CartItem).where(
             CartItem.cart_id == cart.id
         )
 
-        cart_items = db.execute(
-            items_stmt
-        ).scalars().all()
+        result = await db.execute(items_stmt)
+        cart_items = result.scalars().all()
 
-        # Delete all cart items
+        # Delete every item from the cart.
         for cart_item in cart_items:
-            db.delete(cart_item)
+            await db.delete(cart_item)
 
-        db.commit()
+        await db.commit()
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,

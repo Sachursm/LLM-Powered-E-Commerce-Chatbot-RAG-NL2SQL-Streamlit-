@@ -1,62 +1,155 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
- 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.database.dependencies import get_db
 from app.database.models.category import Category
 from app.database.models.product import Product
+from app.database.models.seller_product import SellerProduct
 from app.database.models.audit_log import AuditLog
+from app.database.models.user import User
+
 from app.schemas.product import (
     ProductCreate,
     ProductResponse,
     ProductUpdate
 )
-from app.database.models.seller_product import SellerProduct
 
 from app.core.security import require_admin
-from app.database.models.user import User
- 
+
+
 router = APIRouter(
     prefix="/products",
     tags=["Products"]
 )
- 
- 
-@router.get("/", response_model=list[ProductResponse])
-def get_products(
+
+
+# =========================================================
+# GET ALL PRODUCTS
+# =========================================================
+# Returns BOTH:
+#
+# 1. Admin/imported products
+# 2. Seller products
+#
+# IMPORTANT:
+#
+# SellerProduct is connected using OUTER JOIN.
+#
+# This is required because some admin/imported products
+# do not have a row inside seller_products.
+#
+# If a product has a SellerProduct row:
+#     seller_id = actual seller ID
+#
+# If a product does not have a SellerProduct row:
+#     seller_id = None
+#
+# Therefore ALL products can be displayed.
+# =========================================================
+
+@router.get(
+    "/",
+    response_model=list[ProductResponse]
+)
+async def get_products(
     category: str | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
+
+        # Select Product and seller_id.
+        #
+        # OUTER JOIN is important here.
+        #
+        # It allows products without a SellerProduct
+        # record to still appear.
         stmt = (
-            select(Product, SellerProduct.seller_id)
-            .join(
+            select(
+                Product,
+                SellerProduct.seller_id
+            )
+            .outerjoin(
                 SellerProduct,
                 SellerProduct.product_id == Product.id
             )
         )
 
+        # -------------------------------------------------
+        # CATEGORY FILTER
+        # -------------------------------------------------
+
         if category is not None:
-            stmt = stmt.join(Category).where(
-                Category.name == category
+
+            stmt = (
+                stmt
+                .join(
+                    Category,
+                    Category.id == Product.category_id
+                )
+                .where(
+                    Category.name == category
+                )
             )
 
+        # -------------------------------------------------
+        # MINIMUM PRICE FILTER
+        # -------------------------------------------------
+
         if min_price is not None:
+
             stmt = stmt.where(
                 Product.price >= min_price
             )
 
+        # -------------------------------------------------
+        # MAXIMUM PRICE FILTER
+        # -------------------------------------------------
+
         if max_price is not None:
+
             stmt = stmt.where(
                 Product.price <= max_price
             )
 
-        result = db.execute(stmt)
+        # -------------------------------------------------
+        # ORDER PRODUCTS
+        # -------------------------------------------------
+        # Explicit ordering is better than depending on
+        # SQLite's natural row order.
+        #
+        # id ASC means:
+        #
+        # 1
+        # 2
+        # 3
+        # ...
+        # 1006
+        # 1007
+        #
+        # Both admin and seller products are included.
+        # -------------------------------------------------
 
-        products = result.all()
+        stmt = stmt.order_by(
+            Product.id.asc()
+        )
+
+        # Execute asynchronous database query.
+        result = await db.execute(stmt)
+
+        # Each row contains:
+        #
+        # (Product object, seller_id)
+        #
+        rows = result.all()
+
+        # -------------------------------------------------
+        # CONVERT DATABASE ROWS TO RESPONSE OBJECTS
+        # -------------------------------------------------
 
         return [
             ProductResponse(
@@ -72,35 +165,69 @@ def get_products(
                 category_id=product.category_id,
                 seller_id=seller_id
             )
-            for product, seller_id in products
+            for product, seller_id in rows
         ]
 
     except SQLAlchemyError:
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
- 
-@router.get("/{product_id}", response_model=ProductResponse)
-def get_product(
+
+
+# =========================================================
+# GET SINGLE PRODUCT
+# =========================================================
+# Returns BOTH admin and seller products.
+#
+# We use OUTER JOIN instead of INNER JOIN.
+#
+# Therefore:
+#
+# GET /products/1
+#
+# will work even if product 1 does not exist in
+# seller_products.
+# =========================================================
+
+@router.get(
+    "/{product_id}",
+    response_model=ProductResponse
+)
+async def get_product(
     product_id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
+
+        # Find product and optionally its seller.
+        #
+        # OUTER JOIN means a product can exist without
+        # a SellerProduct record.
         stmt = (
-            select(Product, SellerProduct.seller_id)
-            .join(
+            select(
+                Product,
+                SellerProduct.seller_id
+            )
+            .outerjoin(
                 SellerProduct,
                 SellerProduct.product_id == Product.id
             )
-            .where(Product.id == product_id)
+            .where(
+                Product.id == product_id
+            )
         )
 
-        result = db.execute(stmt)
+        # Execute asynchronously.
+        result = await db.execute(stmt)
 
-        row = result.one_or_none()
+        # Get one matching row.
+        row = result.first()
 
+        # Product does not exist at all.
         if row is None:
+
             raise HTTPException(
                 status_code=404,
                 detail="Product not found"
@@ -108,6 +235,16 @@ def get_product(
 
         product, seller_id = row
 
+        # Return product information.
+        #
+        # seller_id can be:
+        #
+        # actual seller ID
+        #
+        # OR
+        #
+        # None for an imported/admin product that does not
+        # have a SellerProduct record.
         return ProductResponse(
             id=product.id,
             source_product_id=product.source_product_id,
@@ -123,37 +260,61 @@ def get_product(
         )
 
     except SQLAlchemyError:
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
- 
+
+
+# =========================================================
+# CREATE PRODUCT
+# =========================================================
+# Only ADMIN can create products through this route.
+#
+# The product is connected to the admin through
+# SellerProduct.
+#
+# This keeps seller_id OUT of the products table.
+# =========================================================
+
 @router.post(
     "/",
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED
 )
-def create_product(
+async def create_product(
     product_data: ProductCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
+
+        # -------------------------------------------------
+        # FIND CATEGORY
+        # -------------------------------------------------
+
         category_stmt = select(Category).where(
             Category.name == product_data.category
         )
 
-        category = db.execute(
+        category_result = await db.execute(
             category_stmt
-        ).scalar_one_or_none()
+        )
+
+        category = category_result.scalar_one_or_none()
 
         if category is None:
+
             raise HTTPException(
                 status_code=404,
                 detail="Category not found"
             )
 
-        # Create product
+        # -------------------------------------------------
+        # CREATE PRODUCT
+        # -------------------------------------------------
+
         product = Product(
             source_product_id=product_data.source_product_id,
             name=product_data.name,
@@ -165,9 +326,14 @@ def create_product(
         )
 
         db.add(product)
-        db.flush()
 
-        # Connect product to the admin/seller
+        # Get generated product ID.
+        await db.flush()
+
+        # -------------------------------------------------
+        # CONNECT PRODUCT TO ADMIN
+        # -------------------------------------------------
+
         seller_product = SellerProduct(
             seller_id=current_user.id,
             product_id=product.id
@@ -175,7 +341,10 @@ def create_product(
 
         db.add(seller_product)
 
-        # Audit log
+        # -------------------------------------------------
+        # AUDIT LOG
+        # -------------------------------------------------
+
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="PRODUCT",
@@ -187,8 +356,17 @@ def create_product(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(product)
+        # -------------------------------------------------
+        # COMMIT
+        # -------------------------------------------------
+
+        await db.commit()
+
+        await db.refresh(product)
+
+        # -------------------------------------------------
+        # RETURN RESPONSE
+        # -------------------------------------------------
 
         return ProductResponse(
             id=product.id,
@@ -205,67 +383,127 @@ def create_product(
         )
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# =========================================================
+# UPDATE PRODUCT
+# =========================================================
+# Only ADMIN can update products.
+# =========================================================
+
 @router.patch(
     "/{product_id}",
     response_model=ProductResponse
 )
-def update_product(
+async def update_product(
     product_id: int,
     product_data: ProductUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
+
+        # -------------------------------------------------
+        # FIND PRODUCT
+        # -------------------------------------------------
+
         stmt = select(Product).where(
             Product.id == product_id
         )
 
-        result = db.execute(stmt)
+        result = await db.execute(stmt)
 
         product = result.scalar_one_or_none()
 
         if product is None:
+
             raise HTTPException(
                 status_code=404,
                 detail="Product not found"
             )
 
+        # -------------------------------------------------
+        # GET ONLY PROVIDED FIELDS
+        # -------------------------------------------------
+
         update_data = product_data.model_dump(
             exclude_unset=True
         )
 
+        if not update_data:
+
+            raise HTTPException(
+                status_code=400,
+                detail="No fields provided for update"
+            )
+
+        # -------------------------------------------------
+        # CATEGORY UPDATE
+        # -------------------------------------------------
+
         if "category" in update_data:
+
             category_stmt = select(Category).where(
                 Category.name == update_data["category"]
             )
 
-            category = db.execute(
+            category_result = await db.execute(
                 category_stmt
-            ).scalar_one_or_none()
+            )
+
+            category = category_result.scalar_one_or_none()
 
             if category is None:
+
                 raise HTTPException(
                     status_code=404,
                     detail="Category not found"
                 )
 
+            old_category_id = product.category_id
+
             product.category_id = category.id
 
+            # Audit category change.
+            audit_log = AuditLog(
+                actor_user_id=current_user.id,
+                target_type="PRODUCT",
+                target_id=product.id,
+                action="CATEGORY_CHANGED",
+                old_value=str(old_category_id),
+                new_value=str(category.id)
+            )
+
+            db.add(audit_log)
+
+            # Remove category from normal field updates.
             del update_data["category"]
+
+        # -------------------------------------------------
+        # UPDATE OTHER FIELDS
+        # -------------------------------------------------
 
         for field, value in update_data.items():
 
-            old_value = getattr(product, field)
+            old_value = getattr(
+                product,
+                field
+            )
 
-            setattr(product, field, value)
+            setattr(
+                product,
+                field,
+                value
+            )
 
+            # Audit every changed field.
             audit_log = AuditLog(
                 actor_user_id=current_user.id,
                 target_type="PRODUCT",
@@ -277,42 +515,103 @@ def update_product(
 
             db.add(audit_log)
 
-        db.commit()
-        db.refresh(product)
+        # -------------------------------------------------
+        # COMMIT CHANGES
+        # -------------------------------------------------
 
-        return product
+        await db.commit()
+
+        await db.refresh(product)
+
+        # -------------------------------------------------
+        # FIND SELLER
+        # -------------------------------------------------
+        #
+        # Some old/imported admin products may not have
+        # a SellerProduct record.
+        #
+        # Therefore we use scalar_one_or_none().
+        # -------------------------------------------------
+
+        seller_stmt = select(
+            SellerProduct.seller_id
+        ).where(
+            SellerProduct.product_id == product.id
+        )
+
+        seller_result = await db.execute(
+            seller_stmt
+        )
+
+        seller_id = seller_result.scalar_one_or_none()
+
+        # -------------------------------------------------
+        # RETURN UPDATED PRODUCT
+        # -------------------------------------------------
+
+        return ProductResponse(
+            id=product.id,
+            source_product_id=product.source_product_id,
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock,
+            image_url=product.image_url,
+            rating=product.rating,
+            ratings_count=product.ratings_count,
+            category_id=product.category_id,
+            seller_id=seller_id
+        )
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# =========================================================
+# DELETE PRODUCT
+# =========================================================
+# Only ADMIN can delete products.
+# =========================================================
+
 @router.delete(
     "/{product_id}",
     status_code=status.HTTP_204_NO_CONTENT
 )
-def delete_product(
+async def delete_product(
     product_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
+
+        # -------------------------------------------------
+        # FIND PRODUCT
+        # -------------------------------------------------
+
         stmt = select(Product).where(
             Product.id == product_id
         )
 
-        result = db.execute(stmt)
+        result = await db.execute(stmt)
 
         product = result.scalar_one_or_none()
 
         if product is None:
+
             raise HTTPException(
                 status_code=404,
                 detail="Product not found"
             )
+
+        # -------------------------------------------------
+        # AUDIT BEFORE DELETE
+        # -------------------------------------------------
 
         audit_log = AuditLog(
             actor_user_id=current_user.id,
@@ -325,11 +624,21 @@ def delete_product(
 
         db.add(audit_log)
 
-        db.delete(product)
-        db.commit()
+        # -------------------------------------------------
+        # DELETE PRODUCT
+        # -------------------------------------------------
+
+        await db.delete(product)
+
+        # -------------------------------------------------
+        # COMMIT
+        # -------------------------------------------------
+
+        await db.commit()
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,

@@ -1,9 +1,11 @@
 from typing import Literal
 from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+
 from sqlalchemy import select
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import require_admin
 from app.database.dependencies import get_db
@@ -20,36 +22,65 @@ router = APIRouter(
 )
 
 
-@router.get("/users", response_model=list[UserResponse])
-def get_users(
+# =========================================================
+# GET USERS
+# =========================================================
+
+@router.get(
+    "/users",
+    response_model=list[UserResponse]
+)
+async def get_users(
     role: Literal["USER", "SELLER", "ADMIN"] | None = Query(
         default=None
     ),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin)
-):
-    stmt = select(User)
-
-    if role is not None:
-        stmt = stmt.where(User.role == role)
-
-    result = db.execute(stmt)
-
-    users = result.scalars().all()
-
-    return users
-
-@router.patch("/users/{user_id}/role", response_model=UserResponse)
-def update_user_role(
-    user_id: int,
-    role_data: RoleUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
-        stmt = select(User).where(User.id == user_id)
 
-        result = db.execute(stmt)
+        stmt = select(User)
+
+        if role is not None:
+            stmt = stmt.where(
+                User.role == role
+            )
+
+        result = await db.execute(stmt)
+
+        users = result.scalars().all()
+
+        return users
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
+
+
+# =========================================================
+# UPDATE USER ROLE
+# =========================================================
+
+@router.patch(
+    "/users/{user_id}/role",
+    response_model=UserResponse
+)
+async def update_user_role(
+    user_id: int,
+    role_data: RoleUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    try:
+
+        stmt = select(User).where(
+            User.id == user_id
+        )
+
+        result = await db.execute(stmt)
 
         user = result.scalar_one_or_none()
 
@@ -59,30 +90,39 @@ def update_user_role(
                 detail="User not found"
             )
 
-        if role_data.role not in ["USER", "SELLER", "ADMIN"]:
+        if role_data.role not in [
+            "USER",
+            "SELLER",
+            "ADMIN"
+        ]:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid role"
             )
 
+        # Prevent removing the last active admin
         if (
             user.role == "ADMIN"
             and user.status == "ACTIVE"
             and role_data.role != "ADMIN"
         ):
-            active_admin_count = db.execute(
+
+            active_admin_result = await db.execute(
                 select(User).where(
                     User.role == "ADMIN",
                     User.status == "ACTIVE"
                 )
-            ).scalars().all()
+            )
+
+            active_admin_count = (
+                active_admin_result.scalars().all()
+            )
 
             if len(active_admin_count) == 1:
                 raise HTTPException(
                     status_code=400,
                     detail="Cannot remove the last active admin"
                 )
-
 
         old_role = user.role
 
@@ -100,32 +140,42 @@ def update_user_role(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+
+        await db.refresh(user)
 
         return user
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# =========================================================
+# DEACTIVATE USER
+# =========================================================
+
 @router.patch(
     "/users/{user_id}/deactivate",
     response_model=UserResponse
 )
-def deactivate_user(
+async def deactivate_user(
     user_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
-        stmt = select(User).where(User.id == user_id)
 
-        result = db.execute(stmt)
+        stmt = select(User).where(
+            User.id == user_id
+        )
+
+        result = await db.execute(stmt)
 
         user = result.scalar_one_or_none()
 
@@ -141,13 +191,19 @@ def deactivate_user(
                 detail="User is already inactive"
             )
 
+        # Prevent deactivating the last active admin
         if user.role == "ADMIN":
-            active_admin_count = db.execute(
+
+            active_admin_result = await db.execute(
                 select(User).where(
                     User.role == "ADMIN",
                     User.status == "ACTIVE"
                 )
-            ).scalars().all()
+            )
+
+            active_admin_count = (
+                active_admin_result.scalars().all()
+            )
 
             if len(active_admin_count) == 1:
                 raise HTTPException(
@@ -172,32 +228,42 @@ def deactivate_user(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+
+        await db.refresh(user)
 
         return user
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
+# =========================================================
+# ACTIVATE USER
+# =========================================================
+
 @router.patch(
     "/users/{user_id}/activate",
     response_model=UserResponse
 )
-def activate_user(
+async def activate_user(
     user_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
-        stmt = select(User).where(User.id == user_id)
 
-        result = db.execute(stmt)
+        stmt = select(User).where(
+            User.id == user_id
+        )
+
+        result = await db.execute(stmt)
 
         user = result.scalar_one_or_none()
 
@@ -230,13 +296,15 @@ def activate_user(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+
+        await db.refresh(user)
 
         return user
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -244,45 +312,66 @@ def activate_user(
         )
 
 
+# =========================================================
+# GET REACTIVATION REQUESTS
+# =========================================================
+
 @router.get(
-"/reactivation-requests",
-response_model=list[ReactivationRequestResponse]
+    "/reactivation-requests",
+    response_model=list[ReactivationRequestResponse]
 )
-def get_reactivation_requests(
-    db: Session = Depends(get_db),
+async def get_reactivation_requests(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
+
         stmt = (
             select(ReactivationRequest)
-            .where(ReactivationRequest.status == "PENDING")
-            .order_by(ReactivationRequest.created_at)
+            .where(
+                ReactivationRequest.status == "PENDING"
+            )
+            .order_by(
+                ReactivationRequest.created_at
+            )
         )
 
-        requests = db.execute(stmt).scalars().all()
+        result = await db.execute(stmt)
+
+        requests = result.scalars().all()
 
         return requests
 
     except SQLAlchemyError:
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
 
-@router.post("/reactivation-requests/{request_id}/approve")
-def approve_reactivation_request(
+# =========================================================
+# APPROVE REACTIVATION REQUEST
+# =========================================================
+
+@router.post(
+    "/reactivation-requests/{request_id}/approve"
+)
+async def approve_reactivation_request(
     request_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
-        # Find the reactivation request
+
+        # Find request
         stmt = select(ReactivationRequest).where(
             ReactivationRequest.id == request_id
         )
 
-        request = db.execute(stmt).scalar_one_or_none()
+        result = await db.execute(stmt)
+
+        request = result.scalar_one_or_none()
 
         if request is None:
             raise HTTPException(
@@ -290,19 +379,21 @@ def approve_reactivation_request(
                 detail="Reactivation request not found"
             )
 
-        # Make sure it has not already been reviewed
+        # Make sure it is still pending
         if request.status != "PENDING":
             raise HTTPException(
                 status_code=409,
                 detail="Reactivation request has already been reviewed"
             )
 
-        # Find the user
+        # Find user
         user_stmt = select(User).where(
             User.id == request.user_id
         )
 
-        user = db.execute(user_stmt).scalar_one_or_none()
+        user_result = await db.execute(user_stmt)
+
+        user = user_result.scalar_one_or_none()
 
         if user is None:
             raise HTTPException(
@@ -310,16 +401,17 @@ def approve_reactivation_request(
                 detail="User not found"
             )
 
-        # Reactivate the user
+        # Reactivate user
         user.status = "ACTIVE"
         user.deactivated_at = None
+        user.updated_at = datetime.utcnow()
 
-        # Update the request
+        # Update request
         request.status = "APPROVED"
         request.reviewed_at = datetime.utcnow()
         request.reviewed_by = current_user.id
 
-        # Create audit log
+        # Audit log
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="USER",
@@ -332,33 +424,44 @@ def approve_reactivation_request(
         db.add(audit_log)
 
         # One transaction
-        db.commit()
+        await db.commit()
 
         return {
             "message": "User account reactivated successfully"
         }
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
-@router.post("/reactivation-requests/{request_id}/reject")
-def reject_reactivation_request(
+
+# =========================================================
+# REJECT REACTIVATION REQUEST
+# =========================================================
+
+@router.post(
+    "/reactivation-requests/{request_id}/reject"
+)
+async def reject_reactivation_request(
     request_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
     try:
-        # Find the reactivation request
+
+        # Find request
         stmt = select(ReactivationRequest).where(
             ReactivationRequest.id == request_id
         )
 
-        request = db.execute(stmt).scalar_one_or_none()
+        result = await db.execute(stmt)
+
+        request = result.scalar_one_or_none()
 
         if request is None:
             raise HTTPException(
@@ -366,19 +469,21 @@ def reject_reactivation_request(
                 detail="Reactivation request not found"
             )
 
-        # Make sure the request is still pending
+        # Make sure request is still pending
         if request.status != "PENDING":
             raise HTTPException(
                 status_code=409,
                 detail="Reactivation request has already been reviewed"
             )
 
-        # Find the user
+        # Find user
         user_stmt = select(User).where(
             User.id == request.user_id
         )
 
-        user = db.execute(user_stmt).scalar_one_or_none()
+        user_result = await db.execute(user_stmt)
+
+        user = user_result.scalar_one_or_none()
 
         if user is None:
             raise HTTPException(
@@ -386,12 +491,12 @@ def reject_reactivation_request(
                 detail="User not found"
             )
 
-        # Reject the request
+        # Reject request
         request.status = "REJECTED"
         request.reviewed_at = datetime.utcnow()
         request.reviewed_by = current_user.id
 
-        # Create audit log
+        # Audit log
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="USER",
@@ -403,14 +508,15 @@ def reject_reactivation_request(
 
         db.add(audit_log)
 
-        db.commit()
+        await db.commit()
 
         return {
             "message": "Reactivation request rejected successfully"
         }
 
     except SQLAlchemyError:
-        db.rollback()
+
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,

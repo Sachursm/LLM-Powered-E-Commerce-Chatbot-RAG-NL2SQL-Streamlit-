@@ -1,8 +1,9 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
-from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db
 from app.database.models.user import User
@@ -16,23 +17,27 @@ from app.core.security import (
     verify_password,
     hash_password,
     get_current_user
-    )
+)
 
 from app.database.models.reactivation_request import ReactivationRequest
 from app.database.models.audit_log import AuditLog
+
 
 router = APIRouter(
     prefix="/users",
     tags=["Users"]
 )
 
+
 @router.patch("/me", response_model=UserResponse)
-def update_my_profile(
+async def update_my_profile(
     user_data: UserUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
+        # Verify the user's current password before allowing
+        # changes to the profile.
         if not verify_password(
             user_data.current_password,
             current_user.password_hash
@@ -42,6 +47,8 @@ def update_my_profile(
                 detail="Current password is incorrect"
             )
 
+        # Extract only the fields the user wants to update.
+        # current_password is only used for verification.
         update_data = user_data.model_dump(
             exclude_unset=True,
             exclude={"current_password"}
@@ -53,58 +60,64 @@ def update_my_profile(
                 detail="No fields provided for update"
             )
 
+        # Check that the new username is not already used
+        # by another user.
         if "username" in update_data:
-            existing_username = db.execute(
+            existing_username = await db.execute(
                 select(User).where(
                     User.username == update_data["username"],
                     User.id != current_user.id
                 )
-            ).scalar_one_or_none()
+            )
 
-            if existing_username is not None:
+            if existing_username.scalar_one_or_none() is not None:
                 raise HTTPException(
                     status_code=409,
                     detail="Username already exists"
                 )
 
+        # Check that the new email is not already used
+        # by another user.
         if "email" in update_data:
-            existing_email = db.execute(
+            existing_email = await db.execute(
                 select(User).where(
                     User.email == update_data["email"],
                     User.id != current_user.id
                 )
-            ).scalar_one_or_none()
+            )
 
-            if existing_email is not None:
+            if existing_email.scalar_one_or_none() is not None:
                 raise HTTPException(
                     status_code=409,
                     detail="Email already exists"
                 )
 
+        # Apply the requested profile changes.
         for field, value in update_data.items():
             setattr(current_user, field, value)
 
-        db.commit()
-        db.refresh(current_user)
+        await db.commit()
+        await db.refresh(current_user)
 
         return current_user
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
 @router.patch("/me/password")
-def change_password(
+async def change_password(
     password_data: ChangePassword,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Verify the current password
+        # Verify the current password before changing it.
         if not verify_password(
             password_data.current_password,
             current_user.password_hash
@@ -114,7 +127,7 @@ def change_password(
                 detail="Current password is incorrect"
             )
 
-        # Prevent using the same password
+        # Prevent using the same password again.
         if verify_password(
             password_data.new_password,
             current_user.password_hash
@@ -124,19 +137,19 @@ def change_password(
                 detail="New password must be different from current password"
             )
 
-        # Hash the new password
+        # Hash the new password before storing it.
         current_user.password_hash = hash_password(
             password_data.new_password
         )
 
-        db.commit()
+        await db.commit()
 
         return {
             "message": "Password changed successfully"
         }
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -144,16 +157,17 @@ def change_password(
         )
 
 
-
 @router.patch("/me/deactivate")
-def deactivate_my_account(
-    db: Session = Depends(get_db),
+async def deactivate_my_account(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
     try:
+        # Mark the current user's account as inactive.
         current_user.status = "INACTIVE"
         current_user.deactivated_at = datetime.utcnow()
 
+        # Record the account deactivation in the audit log.
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="USER",
@@ -165,14 +179,14 @@ def deactivate_my_account(
 
         db.add(audit_log)
 
-        db.commit()
+        await db.commit()
 
         return {
             "message": "Account deactivated successfully"
         }
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -181,33 +195,33 @@ def deactivate_my_account(
 
 
 @router.post("/me/reactivation-request")
-def request_reactivation(
-    db: Session = Depends(get_db),
+async def request_reactivation(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
     try:
-        # User must be inactive to request reactivation
+        # Only an inactive user can request reactivation.
         if current_user.status == "ACTIVE":
             raise HTTPException(
                 status_code=400,
                 detail="Your account is already active"
             )
 
-        # Check for an existing pending request
-        existing_request = db.execute(
+        # Check whether the user already has a pending request.
+        existing_request = await db.execute(
             select(ReactivationRequest).where(
                 ReactivationRequest.user_id == current_user.id,
                 ReactivationRequest.status == "PENDING"
             )
-        ).scalar_one_or_none()
+        )
 
-        if existing_request is not None:
+        if existing_request.scalar_one_or_none() is not None:
             raise HTTPException(
                 status_code=409,
                 detail="A reactivation request is already pending"
             )
 
-        # Create reactivation request
+        # Create a new reactivation request.
         reactivation_request = ReactivationRequest(
             user_id=current_user.id,
             email=current_user.email,
@@ -215,9 +229,12 @@ def request_reactivation(
         )
 
         db.add(reactivation_request)
-        db.flush()
 
-        # Create audit log
+        # Flush so the reactivation request is persisted
+        # before creating the audit record.
+        await db.flush()
+
+        # Record the request in the audit log.
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="USER",
@@ -229,7 +246,7 @@ def request_reactivation(
 
         db.add(audit_log)
 
-        db.commit()
+        await db.commit()
 
         return {
             "message": "Reactivation request submitted successfully",
@@ -237,11 +254,9 @@ def request_reactivation(
         }
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
-
-

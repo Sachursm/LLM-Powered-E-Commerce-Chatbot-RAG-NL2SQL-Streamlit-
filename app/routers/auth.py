@@ -1,17 +1,20 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db
 from app.database.models.user import User
+
 from app.schemas.seller import SellerCreate, SellerResponse
 from app.schemas.user import (
-    UserCreate, 
-    UserResponse, 
+    UserCreate,
+    UserResponse,
     TokenResponse
-    )
+)
+
 from app.core.security import (
     hash_password,
     verify_password,
@@ -30,9 +33,9 @@ router = APIRouter(
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED
 )
-def register(
+async def register(
     user_data: UserCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         # Check whether username already exists
@@ -40,9 +43,9 @@ def register(
             User.username == user_data.username
         )
 
-        existing_username = db.execute(
-            username_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(username_stmt)
+
+        existing_username = result.scalar_one_or_none()
 
         if existing_username is not None:
             raise HTTPException(
@@ -55,9 +58,9 @@ def register(
             User.email == user_data.email
         )
 
-        existing_email = db.execute(
-            email_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(email_stmt)
+
+        existing_email = result.scalar_one_or_none()
 
         if existing_email is not None:
             raise HTTPException(
@@ -76,33 +79,35 @@ def register(
         )
 
         db.add(user)
-        db.commit()
-        db.refresh(user)
+
+        await db.commit()
+        await db.refresh(user)
 
         return user
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
 
+
 @router.post(
     "/login",
     response_model=TokenResponse
 )
-def login(
+async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         stmt = select(User).where(
             User.username == form_data.username
         )
 
-        result = db.execute(stmt)
+        result = await db.execute(stmt)
 
         user = result.scalar_one_or_none()
 
@@ -143,17 +148,19 @@ def login(
     response_model=SellerResponse,
     status_code=status.HTTP_201_CREATED
 )
-def register_seller(
+async def register_seller(
     seller_data: SellerCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_db)
 ):
     try:
         # Check username
-        existing_username = db.execute(
+        result = await db.execute(
             select(User).where(
                 User.username == seller_data.username
             )
-        ).scalar_one_or_none()
+        )
+
+        existing_username = result.scalar_one_or_none()
 
         if existing_username is not None:
             raise HTTPException(
@@ -162,11 +169,13 @@ def register_seller(
             )
 
         # Check email
-        existing_email = db.execute(
+        result = await db.execute(
             select(User).where(
                 User.email == seller_data.email
             )
-        ).scalar_one_or_none()
+        )
+
+        existing_email = result.scalar_one_or_none()
 
         if existing_email is not None:
             raise HTTPException(
@@ -184,13 +193,14 @@ def register_seller(
         )
 
         db.add(seller)
-        db.commit()
-        db.refresh(seller)
+
+        await db.commit()
+        await db.refresh(seller)
 
         return seller
 
     except SQLAlchemyError as e:
-        db.rollback()
+        await db.rollback()
 
         print("DATABASE ERROR:", e)
 

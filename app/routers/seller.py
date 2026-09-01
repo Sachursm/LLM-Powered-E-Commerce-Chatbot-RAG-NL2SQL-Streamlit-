@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database.dependencies import get_db
 from app.database.models.category import Category
@@ -30,20 +30,19 @@ router = APIRouter(
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED
 )
-def create_seller_product(
+async def create_seller_product(
     product_data: ProductCreate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_seller)
 ):
     try:
-        # Find category
+        # Find the category using an async database query.
         category_stmt = select(Category).where(
             Category.name == product_data.category
         )
 
-        category = db.execute(
-            category_stmt
-        ).scalar_one_or_none()
+        result = await db.execute(category_stmt)
+        category = result.scalar_one_or_none()
 
         if category is None:
             raise HTTPException(
@@ -51,7 +50,9 @@ def create_seller_product(
                 detail="Category not found"
             )
 
-        # Create product
+        # Create a completely new product.
+        # A seller can create a product even if another seller
+        # already sells a similar product.
         product = Product(
             source_product_id=product_data.source_product_id,
             name=product_data.name,
@@ -63,9 +64,12 @@ def create_seller_product(
         )
 
         db.add(product)
-        db.flush()
 
-        # Automatically connect product to this seller
+        # Flush so SQLAlchemy generates product.id before
+        # creating the SellerProduct relationship.
+        await db.flush()
+
+        # Connect the newly created product to the current seller.
         seller_product = SellerProduct(
             seller_id=current_user.id,
             product_id=product.id
@@ -73,7 +77,7 @@ def create_seller_product(
 
         db.add(seller_product)
 
-        # Audit log
+        # Record who created the product.
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="PRODUCT",
@@ -85,13 +89,30 @@ def create_seller_product(
 
         db.add(audit_log)
 
-        db.commit()
-        db.refresh(product)
+        # Save the product, seller relationship, and audit log
+        # as one database transaction.
+        await db.commit()
 
-        return product
+        # Refresh the product so its database-generated values
+        # are available in the response.
+        await db.refresh(product)
+
+        return ProductResponse(
+            id=product.id,
+            source_product_id=product.source_product_id,
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock,
+            image_url=product.image_url,
+            rating=product.rating,
+            ratings_count=product.ratings_count,
+            category_id=product.category_id,
+            seller_id=current_user.id
+        )
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -103,13 +124,14 @@ def create_seller_product(
     "/",
     response_model=list[ProductResponse]
 )
-def get_my_products(
-    db: Session = Depends(get_db),
+async def get_my_products(
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_seller)
 ):
     try:
+        # Get only the products that belong to the current seller.
         stmt = (
-            select(Product)
+            select(Product, SellerProduct.seller_id)
             .join(
                 SellerProduct,
                 SellerProduct.product_id == Product.id
@@ -119,9 +141,26 @@ def get_my_products(
             )
         )
 
-        result = db.execute(stmt)
+        result = await db.execute(stmt)
+        products = result.all()
 
-        return result.scalars().all()
+        # Include seller_id in every product response.
+        return [
+            ProductResponse(
+                id=product.id,
+                source_product_id=product.source_product_id,
+                name=product.name,
+                description=product.description,
+                price=product.price,
+                stock=product.stock,
+                image_url=product.image_url,
+                rating=product.rating,
+                ratings_count=product.ratings_count,
+                category_id=product.category_id,
+                seller_id=seller_id
+            )
+            for product, seller_id in products
+        ]
 
     except SQLAlchemyError:
         raise HTTPException(
@@ -134,14 +173,14 @@ def get_my_products(
     "/{product_id}",
     response_model=ProductResponse
 )
-def update_seller_product(
+async def update_seller_product(
     product_id: int,
     product_data: ProductUpdate,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_seller)
 ):
     try:
-        # Find product owned by current seller
+        # Find the product only if it belongs to the current seller.
         stmt = (
             select(Product)
             .join(
@@ -154,9 +193,8 @@ def update_seller_product(
             )
         )
 
-        product = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+        product = result.scalar_one_or_none()
 
         if product is None:
             raise HTTPException(
@@ -164,6 +202,7 @@ def update_seller_product(
                 detail="Product not found in your products"
             )
 
+        # Get only fields that were actually provided.
         update_data = product_data.model_dump(
             exclude_unset=True
         )
@@ -174,16 +213,16 @@ def update_seller_product(
                 detail="No fields provided for update"
             )
 
-        # Category update
+        # Handle category separately because Product stores
+        # category_id rather than the category name.
         if "category" in update_data:
 
             category_stmt = select(Category).where(
                 Category.name == update_data["category"]
             )
 
-            category = db.execute(
-                category_stmt
-            ).scalar_one_or_none()
+            result = await db.execute(category_stmt)
+            category = result.scalar_one_or_none()
 
             if category is None:
                 raise HTTPException(
@@ -195,6 +234,7 @@ def update_seller_product(
 
             product.category_id = category.id
 
+            # Record the category change.
             audit_log = AuditLog(
                 actor_user_id=current_user.id,
                 target_type="PRODUCT",
@@ -208,13 +248,14 @@ def update_seller_product(
 
             del update_data["category"]
 
-        # Update remaining fields
+        # Update the remaining product fields.
         for field, value in update_data.items():
 
             old_value = getattr(product, field)
 
             setattr(product, field, value)
 
+            # Record every changed field in the audit log.
             audit_log = AuditLog(
                 actor_user_id=current_user.id,
                 target_type="PRODUCT",
@@ -226,13 +267,25 @@ def update_seller_product(
 
             db.add(audit_log)
 
-        db.commit()
-        db.refresh(product)
+        await db.commit()
+        await db.refresh(product)
 
-        return product
+        return ProductResponse(
+            id=product.id,
+            source_product_id=product.source_product_id,
+            name=product.name,
+            description=product.description,
+            price=product.price,
+            stock=product.stock,
+            image_url=product.image_url,
+            rating=product.rating,
+            ratings_count=product.ratings_count,
+            category_id=product.category_id,
+            seller_id=current_user.id
+        )
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
@@ -244,13 +297,13 @@ def update_seller_product(
     "/{product_id}",
     status_code=status.HTTP_204_NO_CONTENT
 )
-def delete_seller_product(
+async def delete_seller_product(
     product_id: int,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_seller)
 ):
     try:
-        # Make sure this product belongs to current seller
+        # Make sure the product belongs to the current seller.
         stmt = (
             select(Product)
             .join(
@@ -263,9 +316,8 @@ def delete_seller_product(
             )
         )
 
-        product = db.execute(
-            stmt
-        ).scalar_one_or_none()
+        result = await db.execute(stmt)
+        product = result.scalar_one_or_none()
 
         if product is None:
             raise HTTPException(
@@ -273,7 +325,7 @@ def delete_seller_product(
                 detail="Product not found in your products"
             )
 
-        # Audit before deletion
+        # Create the audit record before deleting the product.
         audit_log = AuditLog(
             actor_user_id=current_user.id,
             target_type="PRODUCT",
@@ -285,13 +337,15 @@ def delete_seller_product(
 
         db.add(audit_log)
 
-        # Delete product
-        db.delete(product)
+        # Delete the product.
+        # The SellerProduct relationship is configured with
+        # cascade delete, so its seller relationship is removed too.
+        await db.delete(product)
 
-        db.commit()
+        await db.commit()
 
     except SQLAlchemyError:
-        db.rollback()
+        await db.rollback()
 
         raise HTTPException(
             status_code=503,
