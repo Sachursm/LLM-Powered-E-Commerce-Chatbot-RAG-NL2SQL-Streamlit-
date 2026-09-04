@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.database.dependencies import get_db
 from app.database.models.cart import Cart
@@ -124,12 +125,20 @@ async def get_cart(
     current_user: User = Depends(require_active_user)
 ):
     try:
-        # Find the cart belonging to the current user.
-        stmt = select(Cart).where(
-            Cart.user_id == current_user.id
+        # Find the current user's cart and load its items
+        # at the same time.
+        stmt = (
+            select(Cart)
+            .options(
+                selectinload(Cart.items)
+            )
+            .where(
+                Cart.user_id == current_user.id
+            )
         )
 
         result = await db.execute(stmt)
+
         cart = result.scalar_one_or_none()
 
         if cart is None:
@@ -140,12 +149,14 @@ async def get_cart(
 
         return cart
 
+    except HTTPException:
+        raise
+
     except SQLAlchemyError:
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
-
 
 @router.patch(
     "/items/{item_id}",
