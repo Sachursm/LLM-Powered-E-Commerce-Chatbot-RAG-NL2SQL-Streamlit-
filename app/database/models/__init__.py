@@ -16,3 +16,4 @@ from app.database.models.delivery_hub import DeliveryHub
 from app.database.models.delivery_agent import DeliveryAgent
 from app.database.models.hub_manager import HubManager
 from app.database.models.return_request import ReturnRequest
+from app.database.models.review import Review

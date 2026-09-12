@@ -17,6 +17,9 @@ from app.routers.delivery_agents import router as delivery_agents_router
 from app.routers.delivery_operations import router as delivery_operations_router
 from app.routers.admin_management import router as admin_management_router
 from app.routers.returns import router as returns_router
+from app.routers.reviews import router as reviews_router
+
+
 
 
 
@@ -53,3 +56,4 @@ app.include_router(test_auth_router)
 app.include_router(delivery_hubs_router)
 app.include_router(delivery_agents_router)
 app.include_router(delivery_operations_router)
+app.include_router(reviews_router)
