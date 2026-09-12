@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.engine import CursorResult
+from typing import cast
 
 from app.database.dependencies import get_db
 
@@ -14,8 +16,13 @@ from app.database.models.product import Product
 from app.database.models.order import Order
 from app.database.models.order_item import OrderItem
 from app.database.models.seller_product import SellerProduct
+from app.database.models.payment import Payment
+from app.database.models.address import Address
 
-from app.schemas.order import OrderResponse
+from app.schemas.order import (
+    OrderResponse,
+    CreateOrderRequest
+)
 
 from app.core.security import require_active_user
 
@@ -36,6 +43,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED
 )
 async def create_order(
+    order_data: CreateOrderRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
@@ -49,7 +57,6 @@ async def create_order(
             select(Cart)
             .options(
                 selectinload(Cart.items)
-                .selectinload(CartItem.product)
             )
             .where(
                 Cart.user_id == current_user.id
@@ -60,6 +67,10 @@ async def create_order(
 
         cart = result.scalar_one_or_none()
 
+        # -------------------------------------------------
+        # Cart does not exist
+        # -------------------------------------------------
+
         if cart is None:
             raise HTTPException(
                 status_code=404,
@@ -67,30 +78,50 @@ async def create_order(
             )
 
         # -------------------------------------------------
-        # Make sure the cart contains products
+        # Cart is empty
         # -------------------------------------------------
-
         if not cart.items:
-
             raise HTTPException(
                 status_code=400,
                 detail="Cart is empty"
             )
 
         # -------------------------------------------------
-        # Create the order
+        # Validate shipping address
+        # -------------------------------------------------
+
+        address_stmt = (
+            select(Address)
+            .where(
+                Address.id == order_data.shipping_address_id,
+                Address.user_id == current_user.id
+            )
+        )
+
+        address_result = await db.execute(address_stmt)
+
+        address = address_result.scalar_one_or_none()
+
+        if address is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Shipping address not found"
+            )
+
+        # -------------------------------------------------
+        # Create Order
         # -------------------------------------------------
 
         order = Order(
             user_id=current_user.id,
-            status="PENDING"
+            status="PENDING_PAYMENT",
+            shipping_address_id=address.id
         )
 
         db.add(order)
 
-        # Flush so SQLAlchemy generates order.id
-        # before creating OrderItems.
-
+        # Generate order.id
         await db.flush()
 
         # -------------------------------------------------
@@ -99,10 +130,25 @@ async def create_order(
 
         for cart_item in cart.items:
 
-            product = cart_item.product
+            # ---------------------------------------------
+            # Get the current product
+            # ---------------------------------------------
+
+            product_stmt = (
+                select(Product)
+                .where(
+                    Product.id == cart_item.product_id
+                )
+            )
+
+            product_result = await db.execute(
+                product_stmt
+            )
+
+            product = product_result.scalar_one_or_none()
 
             # ---------------------------------------------
-            # Make sure the product still exists
+            # Product does not exist
             # ---------------------------------------------
 
             if product is None:
@@ -116,17 +162,93 @@ async def create_order(
                 )
 
             # ---------------------------------------------
-            # Check stock
+            # Save price BEFORE stock update
+            # ---------------------------------------------
+            #
+            # The order should remember the price at the
+            # time of purchase.
+            #
+            # Product.price can change later.
             # ---------------------------------------------
 
-            if product.stock < cart_item.quantity:
+            unit_price = product.price
+
+            # ---------------------------------------------
+            # ATOMIC STOCK UPDATE
+            # ---------------------------------------------
+            #
+            # Stock is reduced ONLY if:
+            #
+            # Product.id matches
+            # AND
+            # Product.stock >= requested quantity
+            #
+            # This is the important part for preventing
+            # concurrent orders from overselling stock.
+            # ---------------------------------------------
+
+            stock_stmt = (
+                update(Product)
+                .where(
+                    Product.id == product.id,
+                    Product.stock >= cart_item.quantity
+                )
+                .values(
+                    stock=Product.stock - cart_item.quantity
+                )
+            )
+
+            stock_result = await db.execute(
+                stock_stmt
+            )
+
+            # ---------------------------------------------
+            # Stock update failed
+            # ---------------------------------------------
+            #
+            # rowcount == 0 means the UPDATE could not
+            # happen.
+            #
+            # Usually this means insufficient stock.
+            # ---------------------------------------------
+
+            if stock_result.rowcount == 0:
+
+                # Re-read the product to give the user
+                # the actual available stock.
+
+                check_stmt = (
+                    select(Product)
+                    .where(
+                        Product.id == product.id
+                    )
+                )
+
+                check_result = await db.execute(
+                    check_stmt
+                )
+
+                current_product = (
+                    check_result.scalar_one_or_none()
+                )
+
+                if current_product is None:
+
+                    raise HTTPException(
+                        status_code=404,
+                        detail=(
+                            f"Product {product.id} "
+                            "not found"
+                        )
+                    )
 
                 raise HTTPException(
                     status_code=400,
                     detail=(
                         f"Insufficient stock for "
-                        f"product '{product.name}'. "
-                        f"Available stock: {product.stock}"
+                        f"product '{current_product.name}'. "
+                        f"Available stock: "
+                        f"{current_product.stock}"
                     )
                 )
 
@@ -134,11 +256,11 @@ async def create_order(
             # Find product owner
             # ---------------------------------------------
             #
-            # Seller-owned products have an entry in
-            # seller_products.
+            # Seller-owned product:
+            # seller_products contains the product.
             #
-            # Admin-owned products do not have an entry
-            # there, so we identify the admin separately.
+            # Admin-owned product:
+            # no seller_products entry exists.
             # ---------------------------------------------
 
             seller_stmt = (
@@ -149,21 +271,27 @@ async def create_order(
                 .limit(1)
             )
 
-            seller_result = await db.execute(seller_stmt)
+            seller_result = await db.execute(
+                seller_stmt
+            )
 
-            seller_product = seller_result.scalar_one_or_none()
+            seller_product = (
+                seller_result.scalar_one_or_none()
+            )
+
+            # ---------------------------------------------
+            # Seller owns the product
+            # ---------------------------------------------
 
             if seller_product is not None:
 
                 owner_id = seller_product.seller_id
 
-            else:
+            # ---------------------------------------------
+            # Otherwise product belongs to admin
+            # ---------------------------------------------
 
-                # -----------------------------------------
-                # Product has no seller_products entry.
-                #
-                # Find an active ADMIN user.
-                # -----------------------------------------
+            else:
 
                 admin_stmt = (
                     select(User)
@@ -174,9 +302,13 @@ async def create_order(
                     .limit(1)
                 )
 
-                admin_result = await db.execute(admin_stmt)
+                admin_result = await db.execute(
+                    admin_stmt
+                )
 
-                admin_user = admin_result.scalar_one_or_none()
+                admin_user = (
+                    admin_result.scalar_one_or_none()
+                )
 
                 if admin_user is None:
 
@@ -189,23 +321,6 @@ async def create_order(
                     )
 
                 owner_id = admin_user.id
-
-            # ---------------------------------------------
-            # Save the current product price
-            # ---------------------------------------------
-            #
-            # We DO NOT rely on Product.price later.
-            #
-            # Example:
-            #
-            # Product price today = ₹3995
-            # Customer buys it
-            # Product price later = ₹4500
-            #
-            # OrderItem.unit_price remains ₹3995.
-            # ---------------------------------------------
-
-            unit_price = product.price
 
             # ---------------------------------------------
             # Create OrderItem
@@ -221,12 +336,6 @@ async def create_order(
 
             db.add(order_item)
 
-            # ---------------------------------------------
-            # Reduce product stock
-            # ---------------------------------------------
-
-            product.stock -= cart_item.quantity
-
         # -------------------------------------------------
         # Clear the cart
         # -------------------------------------------------
@@ -236,27 +345,24 @@ async def create_order(
             await db.delete(cart_item)
 
         # -------------------------------------------------
-        # Commit EVERYTHING together
+        # Commit everything together
         # -------------------------------------------------
         #
-        # If anything above fails, the transaction is
-        # rolled back.
+        # Order
+        # OrderItems
+        # Stock reduction
+        # Cart deletion
         #
-        # Therefore we don't end up with:
+        # are committed together.
         #
-        # Order created
-        # but stock not reduced
-        #
-        # or:
-        #
-        # Stock reduced
-        # but OrderItem missing.
+        # If an error occurs before commit, rollback
+        # prevents a partial order.
         # -------------------------------------------------
 
         await db.commit()
 
         # -------------------------------------------------
-        # Reload the order including its items
+        # Reload order with items
         # -------------------------------------------------
 
         order_stmt = (
@@ -269,19 +375,27 @@ async def create_order(
             )
         )
 
-        result = await db.execute(order_stmt)
+        result = await db.execute(
+            order_stmt
+        )
 
         order = result.scalar_one()
 
         return order
 
+    # -----------------------------------------------------
+    # Application errors
+    # -----------------------------------------------------
+
     except HTTPException:
-        # HTTPException is an intentional application
-        # error, so rollback and re-raise it.
 
         await db.rollback()
 
         raise
+
+    # -----------------------------------------------------
+    # Database errors
+    # -----------------------------------------------------
 
     except SQLAlchemyError:
 
@@ -291,7 +405,6 @@ async def create_order(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
-
 
 # =========================================================
 # GET MY ORDERS
@@ -390,7 +503,6 @@ async def get_my_order(
 # =========================================================
 # CANCEL ORDER
 # =========================================================
-
 @router.patch(
     "/{order_id}/cancel",
     response_model=OrderResponse
@@ -431,17 +543,15 @@ async def cancel_order(
 
         # -------------------------------------------------
         # Only pending orders can currently be cancelled.
-        #
-        # Later we can expand this logic.
         # -------------------------------------------------
 
-        if order.status != "PENDING":
+        if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
 
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    "Only pending orders "
-                    "can be cancelled"
+                     "Only pending or confirmed "
+                     "orders can be cancelled"
                 )
             )
 
@@ -470,6 +580,64 @@ async def cancel_order(
         # -------------------------------------------------
 
         order.status = "CANCELLED"
+
+        # -------------------------------------------------
+        # Handle payment refund based on payment_status
+        # -------------------------------------------------
+        #
+        # PAID → initiate refund → REFUNDED
+        # UNPAID / FAILED → no refund needed
+        # COD → no refund (customer never paid online)
+        # -------------------------------------------------
+
+        if order.payment_status == "PAID":
+
+            # -----------------------------------------
+            # Find the successful payment record
+            # -----------------------------------------
+
+            payment_stmt = (
+                select(Payment)
+                .where(
+                    Payment.order_id == order.id,
+                    Payment.status == "SUCCESS"
+                )
+                .order_by(
+                    Payment.created_at.desc()
+                )
+                .limit(1)
+            )
+
+            payment_result = await db.execute(
+                payment_stmt
+            )
+
+            payment = payment_result.scalar_one_or_none()
+
+            if payment is not None:
+
+                # -------------------------------------
+                # Simulate refund
+                #
+                # Later replace with:
+                # razorpay_client.payment.refund(
+                #     payment.gateway_payment_id,
+                #     {"amount": int(payment.amount * 100)}
+                # )
+                # -------------------------------------
+
+                payment.status = "REFUNDED"
+                payment.gateway_status = "refunded"
+
+            # -----------------------------------------
+            # Update order payment status
+            # -----------------------------------------
+
+            order.payment_status = "REFUNDED"
+
+        # -------------------------------------------------
+        # Commit everything
+        # -------------------------------------------------
 
         await db.commit()
 

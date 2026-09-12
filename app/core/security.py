@@ -238,3 +238,83 @@ def require_seller(
         )
 
     return current_user
+
+
+# =========================================================
+# DELIVERY AGENT
+# =========================================================
+
+def require_delivery_agent(
+    current_user: User = Depends(get_current_user)
+) -> User:
+
+    if current_user.status != "ACTIVE":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    if current_user.role != "DELIVERY_AGENT":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Delivery agent access required"
+        )
+
+    return current_user
+
+
+# =========================================================
+# HUB MANAGER
+# =========================================================
+
+def require_hub_manager(
+    current_user: User = Depends(get_current_user)
+) -> User:
+
+    if current_user.status != "ACTIVE":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    if current_user.role != "HUB_MANAGER":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hub manager access required"
+        )
+
+    return current_user
+
+
+# =========================================================
+# ADMIN OR HUB MANAGER
+# =========================================================
+
+def require_admin_or_hub_manager(
+    current_user: User = Depends(get_current_user)
+) -> User:
+
+    if current_user.status != "ACTIVE":
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive"
+        )
+
+    if current_user.role not in (
+        "ADMIN", "HUB_MANAGER"
+    ):
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "Admin or hub manager "
+                "access required"
+            )
+        )
+
+    return current_user

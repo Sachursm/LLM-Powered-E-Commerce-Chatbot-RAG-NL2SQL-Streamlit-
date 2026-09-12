@@ -68,5 +68,5 @@ class OrderItem(Base):
     # Product relationship
     product: Mapped["Product"] = relationship()
 
-    # Owner/seller relationship
-    seller: Mapped["User"] = relationship()
+    # Owner relationship
+    owner: Mapped["User"] = relationship()

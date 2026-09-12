@@ -3,6 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
+class CreateOrderRequest(BaseModel):
+    shipping_address_id: int
+
+
 class OrderItemResponse(BaseModel):
     id: int
     order_id: int
@@ -21,6 +25,8 @@ class OrderResponse(BaseModel):
     id: int
     user_id: int
     status: str
+    payment_status: str
+    shipping_address_id: int | None = None
     created_at: datetime
     updated_at: datetime
     items: list[OrderItemResponse]

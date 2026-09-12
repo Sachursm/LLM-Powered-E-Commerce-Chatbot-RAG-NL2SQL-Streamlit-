@@ -12,6 +12,14 @@ if TYPE_CHECKING:
     from app.database.models.seller_product import SellerProduct
     from app.database.models.cart import Cart
     from app.database.models.cart_item import CartItem
+    from app.database.models.payment import Payment
+    from app.database.models.address import Address
+    from app.database.models.delivery_agent import DeliveryAgent
+    from app.database.models.hub_manager import HubManager
+
+
+
+
 
 
 class User(Base):
@@ -81,4 +89,26 @@ class User(Base):
     cascade="all, delete-orphan"
     )
 
-    
+    payments: Mapped[list["Payment"]] = relationship(
+    back_populates="user",
+    cascade="all, delete-orphan"
+   )
+
+    # Add relationship:
+    addresses: Mapped[list["Address"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+
+    # Add relationship:
+    delivery_agent: Mapped["DeliveryAgent | None"] = relationship(
+        back_populates="user",
+        uselist=False
+    )
+
+    # Add relationship:
+    hub_manager: Mapped["HubManager | None"] = relationship(
+        back_populates="user",
+        uselist=False
+    )
+

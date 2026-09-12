@@ -8,3 +8,10 @@ from app.database.models.reactivation_request import ReactivationRequest
 from app.database.models.seller_product import SellerProduct
 from app.database.models.cart import Cart
 from app.database.models.cart_item import CartItem  
+from app.database.models.payment import Payment
+from app.database.models.address import Address
+from app.database.models.shipment import Shipment
+from app.database.models.shipment import ShipmentTracking
+from app.database.models.delivery_hub import DeliveryHub
+from app.database.models.delivery_agent import DeliveryAgent
+from app.database.models.hub_manager import HubManager
