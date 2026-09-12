@@ -47,6 +47,12 @@ class Shipment(Base):
         default="PROCESSING"
     )
 
+    # DELIVERY or RETURN
+    type: Mapped[str] = mapped_column(
+        String(20),
+        default="DELIVERY"
+    )
+
     # Shipping address snapshot
     shipping_address_id: Mapped[int | None] = (
         mapped_column(
@@ -109,6 +115,8 @@ class Shipment(Base):
         nullable=True
     )
 
+      
+
 
 class ShipmentTracking(Base):
     __tablename__ = "shipment_tracking"
@@ -147,3 +155,5 @@ class ShipmentTracking(Base):
     shipment: Mapped["Shipment"] = relationship(
         back_populates="tracking_events"
     )
+
+  

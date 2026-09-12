@@ -21,6 +21,7 @@ class ShipmentResponse(BaseModel):
     order_id: int
     seller_id: int
     customer_id: int
+    type: str = "DELIVERY"
     status: str
     shipping_address_id: int | None = None
     shipped_by: int | None = None

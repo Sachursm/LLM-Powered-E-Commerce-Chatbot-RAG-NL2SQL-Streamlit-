@@ -18,6 +18,10 @@ from app.database.models.order_item import OrderItem
 from app.database.models.seller_product import SellerProduct
 from app.database.models.payment import Payment
 from app.database.models.address import Address
+from app.database.models.shipment import (
+    Shipment,
+    ShipmentTracking
+)
 
 from app.schemas.order import (
     OrderResponse,
@@ -674,4 +678,119 @@ async def cancel_order(
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
+        )
+
+# =========================================================
+# CUSTOMER TRACKING
+# =========================================================
+
+@router.get(
+    "/{order_id}/tracking"
+)
+async def get_order_tracking(
+    order_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_active_user)
+):
+
+    try:
+
+        order_stmt = (
+            select(Order)
+            .where(
+                Order.id == order_id,
+                Order.user_id == current_user.id
+            )
+        )
+
+        order_result = await db.execute(order_stmt)
+
+        order = order_result.scalar_one_or_none()
+
+        if order is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Order not found"
+            )
+
+        shipment_stmt = (
+            select(Shipment)
+            .where(
+                Shipment.order_id == order.id
+            )
+        )
+
+        shipment_result = await db.execute(
+            shipment_stmt
+        )
+
+        shipments = shipment_result.scalars().all()
+
+        shipment_tracking = []
+
+        for shipment in shipments:
+
+            tracking_stmt = (
+                select(ShipmentTracking)
+                .where(
+                    ShipmentTracking.shipment_id == (
+                        shipment.id
+                    )
+                )
+                .order_by(
+                    ShipmentTracking.created_at
+                )
+            )
+
+            tracking_result = await db.execute(
+                tracking_stmt
+            )
+
+            events = tracking_result.scalars().all()
+
+            shipment_tracking.append({
+                "shipment_id": shipment.id,
+                "status": shipment.status,
+                "shipped_at": (
+                    shipment.shipped_at.isoformat()
+                    if shipment.shipped_at else None
+                ),
+                "delivered_at": (
+                    shipment.delivered_at.isoformat()
+                    if shipment.delivered_at else None
+                ),
+                "tracking": [
+                    {
+                        "status": event.status,
+                        "description": (
+                            event.description
+                        ),
+                        "timestamp": (
+                            event.created_at.isoformat()
+                        )
+                    }
+                    for event in events
+                ]
+            })
+
+        return {
+            "order_id": order.id,
+            "order_status": order.status,
+            "payment_status": order.payment_status,
+            "shipments": shipment_tracking
+        }
+
+    except HTTPException:
+
+        raise
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
         )

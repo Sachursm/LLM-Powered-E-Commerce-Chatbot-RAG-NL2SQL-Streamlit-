@@ -16,7 +16,7 @@ from app.schemas.product import (
     ProductUpdate
 )
 
-from app.core.security import require_seller
+from app.core.security import  require_admin_or_seller
 
 
 router = APIRouter(
@@ -33,7 +33,7 @@ router = APIRouter(
 async def create_seller_product(
     product_data: ProductCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_seller)
+    current_user: User = Depends( require_admin_or_seller)
 ):
     try:
         # Find the category using an async database query.
@@ -126,7 +126,7 @@ async def create_seller_product(
 )
 async def get_my_products(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_seller)
+    current_user: User = Depends( require_admin_or_seller)
 ):
     try:
         # Get only the products that belong to the current seller.
@@ -177,7 +177,7 @@ async def update_seller_product(
     product_id: int,
     product_data: ProductUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_seller)
+    current_user: User = Depends( require_admin_or_seller)
 ):
     try:
         # Find the product only if it belongs to the current seller.
@@ -300,7 +300,7 @@ async def update_seller_product(
 async def delete_seller_product(
     product_id: int,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_seller)
+    current_user: User = Depends( require_admin_or_seller)
 ):
     try:
         # Make sure the product belongs to the current seller.
