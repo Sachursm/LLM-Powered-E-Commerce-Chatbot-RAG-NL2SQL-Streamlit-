@@ -58,16 +58,12 @@ async def get_products(
     category: str | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
+    search: str | None = None,
+    sort_by: str | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     try:
 
-        # Select Product and seller_id.
-        #
-        # OUTER JOIN is important here.
-        #
-        # It allows products without a SellerProduct
-        # record to still appear.
         stmt = (
             select(
                 Product,
@@ -78,6 +74,16 @@ async def get_products(
                 SellerProduct.product_id == Product.id
             )
         )
+
+        # -------------------------------------------------
+        # SEARCH FILTER
+        # -------------------------------------------------
+
+        if search is not None:
+
+            stmt = stmt.where(
+                Product.name.ilike(f"%{search}%")
+            )
 
         # -------------------------------------------------
         # CATEGORY FILTER
@@ -117,39 +123,34 @@ async def get_products(
             )
 
         # -------------------------------------------------
-        # ORDER PRODUCTS
-        # -------------------------------------------------
-        # Explicit ordering is better than depending on
-        # SQLite's natural row order.
-        #
-        # id ASC means:
-        #
-        # 1
-        # 2
-        # 3
-        # ...
-        # 1006
-        # 1007
-        #
-        # Both admin and seller products are included.
+        # SORT
         # -------------------------------------------------
 
-        stmt = stmt.order_by(
-            Product.id.asc()
-        )
+        if sort_by == "price_low":
 
-        # Execute asynchronous database query.
+            stmt = stmt.order_by(Product.price.asc())
+
+        elif sort_by == "price_high":
+
+            stmt = stmt.order_by(Product.price.desc())
+
+        elif sort_by == "rating":
+
+            stmt = stmt.order_by(
+                Product.rating.desc().nulls_last()
+            )
+
+        elif sort_by == "name":
+
+            stmt = stmt.order_by(Product.name.asc())
+
+        else:
+
+            stmt = stmt.order_by(Product.id.asc())
+
         result = await db.execute(stmt)
 
-        # Each row contains:
-        #
-        # (Product object, seller_id)
-        #
         rows = result.all()
-
-        # -------------------------------------------------
-        # CONVERT DATABASE ROWS TO RESPONSE OBJECTS
-        # -------------------------------------------------
 
         return [
             ProductResponse(
@@ -174,7 +175,6 @@ async def get_products(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
-
 
 # =========================================================
 # GET SINGLE PRODUCT
