@@ -93,7 +93,6 @@ async def register(
             detail="Database service temporarily unavailable"
         )
 
-
 @router.post(
     "/login",
     response_model=TokenResponse
@@ -135,6 +134,19 @@ async def login(
             "access_token": access_token,
             "token_type": "bearer"
         }
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        print(f"LOGIN ERROR: {type(e).__name__}: {e}")
+
+        raise HTTPException(
+            status_code=503,
+            detail="Database service temporarily unavailable"
+        )
 
     except SQLAlchemyError:
         raise HTTPException(

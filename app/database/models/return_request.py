@@ -113,10 +113,12 @@ class ReturnRequest(Base):
         onupdate=datetime.utcnow
     )
 
-    # Relationships
+       # Relationships
     order: Mapped["Order"] = relationship()
 
-    user: Mapped["User"] = relationship()
+    user: Mapped["User"] = relationship(
+        foreign_keys=[user_id]
+    )
 
     return_shipment: Mapped["Shipment | None"] = (
         relationship()
