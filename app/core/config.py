@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     RAZORPAY_WEBHOOK_SECRET: str
 
+    SMTP_EMAIL: str
+    SMTP_PASSWORD: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore"

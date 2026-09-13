@@ -21,6 +21,11 @@ from app.core.security import (
     create_access_token
 )
 
+import random
+from datetime import datetime, timedelta, timezone
+
+from app.database.models.otp import OTP
+from app.services.email import send_otp_email
 
 router = APIRouter(
     prefix="/auth",
@@ -219,4 +224,334 @@ async def register_seller(
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
+        )
+
+
+# =========================================================
+# FORGOT PASSWORD — Send OTP
+# =========================================================
+
+@router.post("/forgot-password")
+async def forgot_password(
+    email: str,
+    db: AsyncSession = Depends(get_db)
+):
+
+    try:
+
+        # -------------------------------------------------
+        # Find user by email
+        # -------------------------------------------------
+
+        stmt = select(User).where(
+            User.email == email
+        )
+
+        result = await db.execute(stmt)
+
+        user = result.scalar_one_or_none()
+
+        if user is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Email not found"
+            )
+
+        # -------------------------------------------------
+        # Delete any existing OTPs for this email
+        # -------------------------------------------------
+
+        delete_stmt = select(OTP).where(
+            OTP.email == email
+        )
+
+        delete_result = await db.execute(delete_stmt)
+
+        existing_otps = delete_result.scalars().all()
+
+        for old_otp in existing_otps:
+            await db.delete(old_otp)
+
+        # -------------------------------------------------
+        # Generate 6-digit OTP
+        # -------------------------------------------------
+
+        otp_code = str(random.randint(
+            100000, 999999
+        ))
+
+        # -------------------------------------------------
+        # Store OTP with 10 minute expiry
+        # -------------------------------------------------
+
+        otp = OTP(
+            email=email,
+            otp_code=otp_code,
+            expires_at=(
+                datetime.now(timezone.utc) +
+                timedelta(minutes=10)
+            )
+        )
+
+        db.add(otp)
+
+        await db.commit()
+
+        # -------------------------------------------------
+        # Send OTP via email
+        # -------------------------------------------------
+
+        email_sent = await send_otp_email(
+            email, otp_code
+        )
+
+        if not email_sent:
+
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to send OTP email"
+            )
+
+        return {
+            "message": "OTP sent to your email"
+        }
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        await db.rollback()
+
+        print(f"FORGOT PASSWORD ERROR: {e}")
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Service temporarily unavailable"
+            )
+        )
+
+
+# =========================================================
+# RESEND OTP
+# =========================================================
+
+@router.post("/resend-otp")
+async def resend_otp(
+    email: str,
+    db: AsyncSession = Depends(get_db)
+):
+
+    try:
+
+        # -------------------------------------------------
+        # Verify email exists
+        # -------------------------------------------------
+
+        user_stmt = select(User).where(
+            User.email == email
+        )
+
+        user_result = await db.execute(user_stmt)
+
+        if user_result.scalar_one_or_none() is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Email not found"
+            )
+
+        # -------------------------------------------------
+        # Delete old OTPs
+        # -------------------------------------------------
+
+        delete_stmt = select(OTP).where(
+            OTP.email == email
+        )
+
+        delete_result = await db.execute(delete_stmt)
+
+        existing_otps = delete_result.scalars().all()
+
+        for old_otp in existing_otps:
+            await db.delete(old_otp)
+
+        # -------------------------------------------------
+        # Generate new OTP
+        # -------------------------------------------------
+
+        otp_code = str(random.randint(
+            100000, 999999
+        ))
+
+        otp = OTP(
+            email=email,
+            otp_code=otp_code,
+            expires_at=(
+                datetime.now(timezone.utc) +
+                timedelta(minutes=10)
+            )
+        )
+
+        db.add(otp)
+
+        await db.commit()
+
+        # -------------------------------------------------
+        # Send OTP
+        # -------------------------------------------------
+
+        email_sent = await send_otp_email(
+            email, otp_code
+        )
+
+        if not email_sent:
+
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to send OTP email"
+            )
+
+        return {
+            "message": "New OTP sent to your email"
+        }
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        await db.rollback()
+
+        print(f"RESEND OTP ERROR: {e}")
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Service temporarily unavailable"
+            )
+        )
+
+
+# =========================================================
+# RESET PASSWORD — Verify OTP + Set New Password
+# =========================================================
+
+from pydantic import BaseModel
+
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    otp: str
+    new_password: str
+
+
+@router.post("/reset-password")
+async def reset_password(
+    reset_data: ResetPasswordRequest,
+    db: AsyncSession = Depends(get_db)
+):
+
+    try:
+
+        # -------------------------------------------------
+        # Find OTP
+        # -------------------------------------------------
+
+        otp_stmt = (
+            select(OTP)
+            .where(
+                OTP.email == reset_data.email,
+                OTP.otp_code == reset_data.otp
+            )
+        )
+
+        otp_result = await db.execute(otp_stmt)
+
+        otp = otp_result.scalar_one_or_none()
+
+        if otp is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid OTP"
+            )
+
+        # -------------------------------------------------
+        # Check if OTP is expired
+        # -------------------------------------------------
+
+        if datetime.now(timezone.utc) > (
+            otp.expires_at.replace(
+                tzinfo=timezone.utc
+            )
+        ):
+
+            await db.delete(otp)
+
+            await db.commit()
+
+            raise HTTPException(
+                status_code=400,
+                detail="OTP has expired"
+            )
+
+        # -------------------------------------------------
+        # Find user
+        # -------------------------------------------------
+
+        user_stmt = select(User).where(
+            User.email == reset_data.email
+        )
+
+        user_result = await db.execute(user_stmt)
+
+        user = user_result.scalar_one_or_none()
+
+        if user is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="User not found"
+            )
+
+        # -------------------------------------------------
+        # Update password
+        # -------------------------------------------------
+
+        user.password_hash = hash_password(
+            reset_data.new_password
+        )
+
+        # -------------------------------------------------
+        # Delete OTP
+        # -------------------------------------------------
+
+        await db.delete(otp)
+
+        await db.commit()
+
+        return {
+            "message": "Password reset successful"
+        }
+
+    except HTTPException:
+
+        raise
+
+    except Exception as e:
+
+        await db.rollback()
+
+        print(f"RESET PASSWORD ERROR: {e}")
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Service temporarily unavailable"
+            )
         )
