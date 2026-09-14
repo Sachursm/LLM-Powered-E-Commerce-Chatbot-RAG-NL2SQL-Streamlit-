@@ -18,14 +18,7 @@ from app.routers.delivery_operations import router as delivery_operations_router
 from app.routers.admin_management import router as admin_management_router
 from app.routers.returns import router as returns_router
 from app.routers.reviews import router as reviews_router
-
-
-
-
-
-
-
-
+from app.routers.seller_payouts import router as seller_payouts_router
 
 
 app = FastAPI(
@@ -33,27 +26,30 @@ app = FastAPI(
     version="1.0.0"
 )
 
+
 @app.get("/")
 def root():
     return {
         "message": "E-Commerce API is running"
     }
 
+
 app.include_router(auth_router)
 app.include_router(user_router)
 app.include_router(admin_router)
 app.include_router(admin_management_router)
 app.include_router(seller_router)
+app.include_router(seller_orders_router)
+app.include_router(seller_payouts_router)
 app.include_router(categories_router)
 app.include_router(products_router)
-app.include_router(seller_orders_router)
 app.include_router(address_router)
 app.include_router(cart_router)
 app.include_router(orders_router)
-app.include_router(returns_router)
 app.include_router(payment_router)
-app.include_router(test_auth_router)
+app.include_router(returns_router)
+app.include_router(reviews_router)
 app.include_router(delivery_hubs_router)
 app.include_router(delivery_agents_router)
 app.include_router(delivery_operations_router)
-app.include_router(reviews_router)
+app.include_router(test_auth_router)

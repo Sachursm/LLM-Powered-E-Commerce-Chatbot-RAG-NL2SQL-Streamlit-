@@ -19,6 +19,14 @@ from app.database.dependencies import get_db
 from app.database.models.user import User
 from app.database.models.order import Order
 from app.database.models.payment import Payment
+from app.database.models.order_item import (
+    OrderItem
+)
+from app.database.models.seller_payout import (
+    SellerPayout,
+    SellerCommission
+)
+
 
 from app.schemas.payment import PaymentResponse
 
@@ -346,6 +354,81 @@ async def razorpay_webhook(
 
                     order.payment_status = "PAID"
                     order.status = "CONFIRMED"
+
+                    
+                    items_stmt = (
+                        select(OrderItem)
+                        .where(
+                            OrderItem.order_id == (
+                                order.id
+                            )
+                        )
+                    )
+
+                    items_result = await db.execute(
+                        items_stmt
+                    )
+
+                    order_items = (
+                        items_result.scalars().all()
+                    )
+
+                    for item in order_items:
+
+                        comm_stmt = (
+                            select(SellerCommission)
+                            .where(
+                                SellerCommission.seller_id
+                                == item.owner_id
+                            )
+                        )
+
+                        comm_result = await db.execute(
+                            comm_stmt
+                        )
+
+                        commission = (
+                            comm_result
+                            .scalar_one_or_none()
+                        )
+
+                        rate = (
+                            commission.rate
+                            if commission
+                            else 0.15
+                        )
+
+                        sale_amount = (
+                            item.unit_price *
+                            item.quantity
+                        )
+
+                        commission_amount = (
+                            sale_amount * rate
+                        )
+
+                        payout_amount = (
+                            sale_amount -
+                            commission_amount
+                        )
+
+                        payout = SellerPayout(
+                            seller_id=item.owner_id,
+                            order_id=order.id,
+                            order_item_id=item.id,
+                            product_id=item.product_id,
+                            sale_amount=sale_amount,
+                            commission_rate=rate,
+                            commission_amount=round(
+                                commission_amount, 2
+                            ),
+                            payout_amount=round(
+                                payout_amount, 2
+                            ),
+                            status="PENDING"
+                        )
+
+                        db.add(payout)
 
                 await db.commit()
 

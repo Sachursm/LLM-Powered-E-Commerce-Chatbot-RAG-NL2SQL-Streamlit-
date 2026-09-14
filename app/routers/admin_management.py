@@ -26,7 +26,20 @@ from app.schemas.shipment import (
     ShipmentResponse,
     ShipmentTrackingResponse
 )
+from app.database.models.seller_bank import SellerBank
+from app.database.models.seller_payout import (
+    SellerPayout,
+    SellerCommission
+)
 
+from app.schemas.seller_payout import (
+    CommissionUpdate,
+    CommissionResponse,
+    SellerPayoutResponse,
+    SellerBankResponse,
+    PayoutProcess,
+    PayoutHold
+)
 from app.core.security import require_admin
 
 from sqlalchemy.orm import selectinload
@@ -875,6 +888,689 @@ async def get_audit_logs(
             }
             for log in logs
         ]
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: SET COMMISSION RATE
+# =========================================================
+
+@router.post(
+    "/sellers/{seller_id}/commission",
+    response_model=CommissionResponse
+)
+async def set_commission_rate(
+    seller_id: int,
+    commission_data: CommissionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        if (commission_data.rate < 0 or
+                commission_data.rate > 1):
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Rate must be between "
+                    "0 and 1 (e.g. 0.15 for 15%)"
+                )
+            )
+
+        seller_stmt = (
+            select(User)
+            .where(User.id == seller_id)
+        )
+
+        seller_result = await db.execute(
+            seller_stmt
+        )
+
+        if seller_result.scalar_one_or_none() is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Seller not found"
+            )
+
+        existing_stmt = (
+            select(SellerCommission)
+            .where(
+                SellerCommission.seller_id == seller_id
+            )
+        )
+
+        existing_result = await db.execute(
+            existing_stmt
+        )
+
+        commission = (
+            existing_result.scalar_one_or_none()
+        )
+
+        if commission is not None:
+
+            commission.rate = commission_data.rate
+            commission.set_by = current_user.id
+
+        else:
+
+            commission = SellerCommission(
+                seller_id=seller_id,
+                rate=commission_data.rate,
+                set_by=current_user.id
+            )
+
+            db.add(commission)
+
+        await db.commit()
+
+        await db.refresh(commission)
+
+        return commission
+
+    except HTTPException:
+
+        await db.rollback()
+
+        raise
+
+    except SQLAlchemyError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: GET COMMISSION RATE
+# =========================================================
+
+@router.get(
+    "/sellers/{seller_id}/commission",
+    response_model=CommissionResponse
+)
+async def get_commission_rate(
+    seller_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        stmt = (
+            select(SellerCommission)
+            .where(
+                SellerCommission.seller_id == seller_id
+            )
+        )
+
+        result = await db.execute(stmt)
+
+        commission = result.scalar_one_or_none()
+
+        if commission is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Commission not set. "
+                    "Default is 15%"
+                )
+            )
+
+        return commission
+
+    except HTTPException:
+
+        raise
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: VIEW ALL PAYOUTS
+# =========================================================
+
+@router.get(
+    "/payouts",
+    response_model=list[SellerPayoutResponse]
+)
+async def get_all_payouts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin),
+    status_filter: str | None = Query(
+        None, alias="status"
+    ),
+    seller_id: int | None = None
+):
+
+    try:
+
+        stmt = select(SellerPayout)
+
+        if status_filter is not None:
+
+            stmt = stmt.where(
+                SellerPayout.status == (
+                    status_filter.upper()
+                )
+            )
+
+        if seller_id is not None:
+
+            stmt = stmt.where(
+                SellerPayout.seller_id == seller_id
+            )
+
+        stmt = stmt.order_by(
+            SellerPayout.created_at.desc()
+        )
+
+        result = await db.execute(stmt)
+
+        return result.scalars().all()
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: CHECK ELIGIBLE PAYOUTS
+# =========================================================
+
+@router.post("/payouts/check-eligible")
+async def check_eligible_payouts(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        from datetime import datetime, timezone
+
+        stmt = (
+            select(SellerPayout)
+            .where(
+                SellerPayout.status == "PENDING",
+                SellerPayout.eligible_at != None,
+                SellerPayout.eligible_at <= (
+                    datetime.now(timezone.utc)
+                )
+            )
+        )
+
+        result = await db.execute(stmt)
+
+        payouts = result.scalars().all()
+
+        count = 0
+
+        for payout in payouts:
+
+            payout.status = "ELIGIBLE"
+            count += 1
+
+        await db.commit()
+
+        return {
+            "message": (
+                f"{count} payouts marked as eligible"
+            ),
+            "count": count
+        }
+
+    except SQLAlchemyError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: PAYOUT SUMMARY
+# =========================================================
+
+@router.get("/payouts/summary")
+async def get_admin_payout_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        total_stmt = (
+            select(
+                func.sum(SellerPayout.payout_amount)
+            )
+            .where(
+                SellerPayout.status == "ELIGIBLE"
+            )
+        )
+
+        total_result = await db.execute(total_stmt)
+
+        total_eligible = total_result.scalar() or 0
+
+        paid_stmt = (
+            select(
+                func.sum(SellerPayout.payout_amount)
+            )
+            .where(
+                SellerPayout.status == "PAID"
+            )
+        )
+
+        paid_result = await db.execute(paid_stmt)
+
+        total_paid = paid_result.scalar() or 0
+
+        hold_stmt = (
+            select(
+                func.sum(SellerPayout.payout_amount)
+            )
+            .where(
+                SellerPayout.status == "ON_HOLD"
+            )
+        )
+
+        hold_result = await db.execute(hold_stmt)
+
+        total_on_hold = hold_result.scalar() or 0
+
+        commission_stmt = (
+            select(
+                func.sum(
+                    SellerPayout.commission_amount
+                )
+            )
+        )
+
+        commission_result = await db.execute(
+            commission_stmt
+        )
+
+        total_commission = (
+            commission_result.scalar() or 0
+        )
+
+        pending_count_stmt = (
+            select(func.count(SellerPayout.id))
+            .where(
+                SellerPayout.status == "ELIGIBLE"
+            )
+        )
+
+        pending_count_result = await db.execute(
+            pending_count_stmt
+        )
+
+        pending_count = (
+            pending_count_result.scalar() or 0
+        )
+
+        return {
+            "total_eligible_for_payout": total_eligible,
+            "total_paid": total_paid,
+            "total_on_hold": total_on_hold,
+            "total_commission_earned": total_commission,
+            "pending_payout_count": pending_count
+        }
+
+    except SQLAlchemyError:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: PROCESS PAYOUT
+# =========================================================
+
+@router.post(
+    "/payouts/{payout_id}/process"
+)
+async def process_payout(
+    payout_id: int,
+    process_data: PayoutProcess,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        from datetime import datetime, timezone
+
+        stmt = (
+            select(SellerPayout)
+            .where(SellerPayout.id == payout_id)
+        )
+
+        result = await db.execute(stmt)
+
+        payout = result.scalar_one_or_none()
+
+        if payout is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Payout not found"
+            )
+
+        if payout.status != "ELIGIBLE":
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Payout is '{payout.status}'. "
+                    f"Only eligible payouts can "
+                    f"be processed"
+                )
+            )
+
+        bank_stmt = (
+            select(SellerBank)
+            .where(
+                SellerBank.seller_id == (
+                    payout.seller_id
+                )
+            )
+        )
+
+        bank_result = await db.execute(bank_stmt)
+
+        bank = bank_result.scalar_one_or_none()
+
+        if bank is None:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Seller has not added "
+                    "bank details"
+                )
+            )
+
+        payout.status = "PAID"
+        payout.paid_at = datetime.now(timezone.utc)
+        payout.transaction_ref = (
+            process_data.transaction_ref
+        )
+        payout.admin_notes = (
+            process_data.admin_notes
+        )
+
+        await db.commit()
+
+        return {
+            "payout_id": payout.id,
+            "status": "PAID",
+            "amount": payout.payout_amount,
+            "seller_id": payout.seller_id,
+            "transaction_ref": (
+                payout.transaction_ref
+            ),
+            "bank": {
+                "account_holder": (
+                    bank.account_holder
+                ),
+                "bank_name": bank.bank_name,
+                "account_number": (
+                    bank.account_number
+                ),
+                "ifsc_code": bank.ifsc_code
+            },
+            "message": (
+                f"₹{payout.payout_amount} paid "
+                f"to {bank.account_holder}"
+            )
+        }
+
+    except HTTPException:
+
+        await db.rollback()
+
+        raise
+
+    except SQLAlchemyError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: HOLD PAYOUT
+# =========================================================
+
+@router.post(
+    "/payouts/{payout_id}/hold"
+)
+async def hold_payout(
+    payout_id: int,
+    hold_data: PayoutHold,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        stmt = (
+            select(SellerPayout)
+            .where(SellerPayout.id == payout_id)
+        )
+
+        result = await db.execute(stmt)
+
+        payout = result.scalar_one_or_none()
+
+        if payout is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Payout not found"
+            )
+
+        if payout.status == "PAID":
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Cannot hold an already "
+                    "paid payout"
+                )
+            )
+
+        payout.status = "ON_HOLD"
+        payout.admin_notes = hold_data.admin_notes
+
+        await db.commit()
+
+        return {
+            "payout_id": payout.id,
+            "status": "ON_HOLD",
+            "admin_notes": hold_data.admin_notes,
+            "message": "Payout put on hold"
+        }
+
+    except HTTPException:
+
+        await db.rollback()
+
+        raise
+
+    except SQLAlchemyError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: RELEASE HOLD
+# =========================================================
+
+@router.post(
+    "/payouts/{payout_id}/release"
+)
+async def release_payout(
+    payout_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        stmt = (
+            select(SellerPayout)
+            .where(SellerPayout.id == payout_id)
+        )
+
+        result = await db.execute(stmt)
+
+        payout = result.scalar_one_or_none()
+
+        if payout is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Payout not found"
+            )
+
+        if payout.status != "ON_HOLD":
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Only on-hold payouts "
+                    "can be released"
+                )
+            )
+
+        payout.status = "ELIGIBLE"
+        payout.admin_notes = None
+
+        await db.commit()
+
+        return {
+            "payout_id": payout.id,
+            "status": "ELIGIBLE",
+            "message": "Payout released"
+        }
+
+    except HTTPException:
+
+        await db.rollback()
+
+        raise
+
+    except SQLAlchemyError:
+
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Database service temporarily "
+                "unavailable"
+            )
+        )
+
+
+# =========================================================
+# ADMIN: VIEW SELLER BANK DETAILS
+# =========================================================
+
+@router.get(
+    "/sellers/{seller_id}/bank",
+    response_model=SellerBankResponse
+)
+async def get_seller_bank(
+    seller_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+
+    try:
+
+        stmt = (
+            select(SellerBank)
+            .where(
+                SellerBank.seller_id == seller_id
+            )
+        )
+
+        result = await db.execute(stmt)
+
+        bank = result.scalar_one_or_none()
+
+        if bank is None:
+
+            raise HTTPException(
+                status_code=404,
+                detail="Bank details not found"
+            )
+
+        return bank
+
+    except HTTPException:
+
+        raise
 
     except SQLAlchemyError:
 

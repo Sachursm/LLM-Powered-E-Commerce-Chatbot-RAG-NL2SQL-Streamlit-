@@ -18,6 +18,10 @@ from app.database.models.shipment import (
     Shipment,
     ShipmentTracking
 )
+from app.database.models.seller_payout import (
+                SellerPayout
+            )
+from datetime import timedelta
 from app.database.models.hub_manager import HubManager
 
 from app.schemas.shipment import ShipOutRequest
@@ -734,6 +738,30 @@ async def deliver_shipment(
         if order is not None:
 
             order.status = "DELIVERED"
+
+            # ---------------------------------
+            # Update payout eligibility
+            # ---------------------------------
+            payout_stmt = (
+                select(SellerPayout)
+                .where(
+                    SellerPayout.order_id == order.id,
+                    SellerPayout.status == "PENDING"
+                )
+            )
+
+            payout_result = await db.execute(
+                payout_stmt
+            )
+
+            payouts = payout_result.scalars().all()
+
+            for p in payouts:
+
+                p.eligible_at = (
+                    datetime.utcnow() +
+                    timedelta(minutes=1)   # timedelta(days=7)
+                )
 
         tracking = ShipmentTracking(
             shipment_id=shipment.id,

@@ -18,3 +18,8 @@ from app.database.models.hub_manager import HubManager
 from app.database.models.return_request import ReturnRequest
 from app.database.models.review import Review
 from app.database.models.otp import OTP
+from app.database.models.seller_bank import SellerBank
+from app.database.models.seller_payout import (
+    SellerPayout,
+    SellerCommission
+)
