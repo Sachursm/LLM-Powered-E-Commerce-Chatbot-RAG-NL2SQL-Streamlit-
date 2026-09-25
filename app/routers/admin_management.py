@@ -44,6 +44,10 @@ from app.core.security import require_admin
 
 from sqlalchemy.orm import selectinload
 
+from datetime import date, datetime, time
+
+from app.schemas.pagination import PaginatedResponse
+
 
 router = APIRouter(
     prefix="/admin",
@@ -158,14 +162,17 @@ async def admin_dashboard(
 # =========================================================
 # ALL ORDERS (with filters)
 # =========================================================
-
 @router.get(
     "/orders",
-    response_model=list[OrderResponse]
+    response_model=PaginatedResponse[OrderResponse]
 )
 async def get_all_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
     order_status: str | None = Query(
         None, description="Filter by order status"
     ),
@@ -184,9 +191,45 @@ async def get_all_orders(
             .options(selectinload(Order.items))
         )
 
+        count_stmt = select(func.count(Order.id))
+
+        # Date filters
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                Order.created_at >= from_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Order.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                Order.created_at <= to_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Order.created_at <= to_datetime
+            )
+
+        # Status filters
         if order_status is not None:
 
             stmt = stmt.where(
+                Order.status == order_status.upper()
+            )
+
+            count_stmt = count_stmt.where(
                 Order.status == order_status.upper()
             )
 
@@ -198,19 +241,43 @@ async def get_all_orders(
                 )
             )
 
+            count_stmt = count_stmt.where(
+                Order.payment_status == (
+                    payment_status.upper()
+                )
+            )
+
         if user_id is not None:
 
             stmt = stmt.where(
                 Order.user_id == user_id
             )
 
-        stmt = stmt.order_by(
-            Order.created_at.desc()
+            count_stmt = count_stmt.where(
+                Order.user_id == user_id
+            )
+
+        # Count + paginate
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        stmt = (
+            stmt
+            .order_by(Order.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
 
-        return result.scalars().all()
+        return {
+            "items": result.scalars().all(),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
@@ -221,7 +288,6 @@ async def get_all_orders(
                 "unavailable"
             )
         )
-
 
 # =========================================================
 # SINGLE ORDER DETAIL
@@ -494,37 +560,70 @@ async def get_all_payments(
 # =========================================================
 # ALL SHIPMENTS (with filters)
 # =========================================================
-
 @router.get("/shipments")
 async def get_all_shipments(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
     status_filter: str | None = Query(
         None,
         alias="status",
         description="Filter by shipment status"
     ),
-    order_id: int | None = Query(
-        None, description="Filter by order ID"
-    ),
-    seller_id: int | None = Query(
-        None, description="Filter by seller ID"
-    ),
-    hub_id: int | None = Query(
-        None, description="Filter by current hub ID"
-    ),
-    agent_id: int | None = Query(
-        None, description="Filter by agent ID"
-    )
+    order_id: int | None = None,
+    seller_id: int | None = None,
+    hub_id: int | None = None,
+    agent_id: int | None = None
 ):
 
     try:
 
         stmt = select(Shipment)
 
+        count_stmt = select(
+            func.count(Shipment.id)
+        )
+
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                Shipment.created_at >= from_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Shipment.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                Shipment.created_at <= to_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Shipment.created_at <= to_datetime
+            )
+
         if status_filter is not None:
 
             stmt = stmt.where(
+                Shipment.status == (
+                    status_filter.upper()
+                )
+            )
+
+            count_stmt = count_stmt.where(
                 Shipment.status == (
                     status_filter.upper()
                 )
@@ -536,9 +635,17 @@ async def get_all_shipments(
                 Shipment.order_id == order_id
             )
 
+            count_stmt = count_stmt.where(
+                Shipment.order_id == order_id
+            )
+
         if seller_id is not None:
 
             stmt = stmt.where(
+                Shipment.seller_id == seller_id
+            )
+
+            count_stmt = count_stmt.where(
                 Shipment.seller_id == seller_id
             )
 
@@ -548,21 +655,37 @@ async def get_all_shipments(
                 Shipment.current_hub_id == hub_id
             )
 
+            count_stmt = count_stmt.where(
+                Shipment.current_hub_id == hub_id
+            )
+
         if agent_id is not None:
 
             stmt = stmt.where(
                 Shipment.assigned_agent_id == agent_id
             )
 
-        stmt = stmt.order_by(
-            Shipment.created_at.desc()
+            count_stmt = count_stmt.where(
+                Shipment.assigned_agent_id == agent_id
+            )
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        stmt = (
+            stmt
+            .order_by(Shipment.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
 
         shipments = result.scalars().all()
 
-        response = []
+        # Build response with tracking
+        items = []
 
         for shipment in shipments:
 
@@ -584,7 +707,7 @@ async def get_all_shipments(
 
             events = tracking_result.scalars().all()
 
-            response.append({
+            items.append({
                 "id": shipment.id,
                 "order_id": shipment.order_id,
                 "seller_id": shipment.seller_id,
@@ -619,7 +742,13 @@ async def get_all_shipments(
                 ]
             })
 
-        return response
+        return {
+            "items": items,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
@@ -630,8 +759,6 @@ async def get_all_shipments(
                 "unavailable"
             )
         )
-
-
 # =========================================================
 # SINGLE SHIPMENT DETAIL
 # =========================================================
@@ -1056,14 +1183,17 @@ async def get_commission_rate(
 # =========================================================
 # ADMIN: VIEW ALL PAYOUTS
 # =========================================================
-
 @router.get(
     "/payouts",
-    response_model=list[SellerPayoutResponse]
+    response_model=PaginatedResponse[SellerPayoutResponse]
 )
 async def get_all_payouts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
     status_filter: str | None = Query(
         None, alias="status"
     ),
@@ -1074,9 +1204,47 @@ async def get_all_payouts(
 
         stmt = select(SellerPayout)
 
+        count_stmt = select(
+            func.count(SellerPayout.id)
+        )
+
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                SellerPayout.created_at >= from_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                SellerPayout.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                SellerPayout.created_at <= to_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                SellerPayout.created_at <= to_datetime
+            )
+
         if status_filter is not None:
 
             stmt = stmt.where(
+                SellerPayout.status == (
+                    status_filter.upper()
+                )
+            )
+
+            count_stmt = count_stmt.where(
                 SellerPayout.status == (
                     status_filter.upper()
                 )
@@ -1088,13 +1256,30 @@ async def get_all_payouts(
                 SellerPayout.seller_id == seller_id
             )
 
-        stmt = stmt.order_by(
-            SellerPayout.created_at.desc()
+            count_stmt = count_stmt.where(
+                SellerPayout.seller_id == seller_id
+            )
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        stmt = (
+            stmt
+            .order_by(SellerPayout.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
 
-        return result.scalars().all()
+        return {
+            "items": result.scalars().all(),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
@@ -1105,8 +1290,6 @@ async def get_all_payouts(
                 "unavailable"
             )
         )
-
-
 # =========================================================
 # ADMIN: CHECK ELIGIBLE PAYOUTS
 # =========================================================

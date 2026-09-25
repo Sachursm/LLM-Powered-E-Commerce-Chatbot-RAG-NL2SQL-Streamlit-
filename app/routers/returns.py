@@ -4,11 +4,14 @@ from fastapi import (
     APIRouter, Depends, HTTPException, Query, status
 )
 
-from sqlalchemy import select
+from sqlalchemy import select,func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from datetime import datetime
+from datetime import date, datetime, time
+
+
+from app.schemas.pagination import PaginatedResponse
 
 from app.database.dependencies import get_db
 
@@ -303,31 +306,69 @@ async def get_my_returns(
 
 @router.get(
     "/admin/returns",
-    response_model=list[ReturnRequestResponse]
+    response_model=PaginatedResponse[ReturnRequestResponse]
 )
 async def get_all_returns(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
     status_filter: str | None = Query(
         None,
         alias="status",
         description="Filter by status"
     ),
-    user_id: int | None = Query(
-        None, description="Filter by customer"
-    ),
-    order_id: int | None = Query(
-        None, description="Filter by order"
-    )
+    user_id: int | None = None,
+    order_id: int | None = None
 ):
 
     try:
 
         stmt = select(ReturnRequest)
 
+        count_stmt = select(
+            func.count(ReturnRequest.id)
+        )
+
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                ReturnRequest.created_at >= from_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                ReturnRequest.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                ReturnRequest.created_at <= to_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                ReturnRequest.created_at <= to_datetime
+            )
+
         if status_filter is not None:
 
             stmt = stmt.where(
+                ReturnRequest.status == (
+                    status_filter.upper()
+                )
+            )
+
+            count_stmt = count_stmt.where(
                 ReturnRequest.status == (
                     status_filter.upper()
                 )
@@ -339,19 +380,40 @@ async def get_all_returns(
                 ReturnRequest.user_id == user_id
             )
 
+            count_stmt = count_stmt.where(
+                ReturnRequest.user_id == user_id
+            )
+
         if order_id is not None:
 
             stmt = stmt.where(
                 ReturnRequest.order_id == order_id
             )
 
-        stmt = stmt.order_by(
-            ReturnRequest.created_at.desc()
+            count_stmt = count_stmt.where(
+                ReturnRequest.order_id == order_id
+            )
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        stmt = (
+            stmt
+            .order_by(ReturnRequest.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
 
-        return result.scalars().all()
+        return {
+            "items": result.scalars().all(),
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
@@ -362,7 +424,6 @@ async def get_all_returns(
                 "unavailable"
             )
         )
-
 
 # =========================================================
 # ADMIN: GET SINGLE RETURN

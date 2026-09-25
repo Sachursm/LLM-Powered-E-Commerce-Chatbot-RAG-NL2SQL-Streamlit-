@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update,func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -28,6 +28,8 @@ from app.schemas.order import (
     CreateOrderRequest
 )
 
+from app.schemas.pagination import PaginatedResponse
+
 from app.core.security import require_active_user
 
 
@@ -36,6 +38,7 @@ router = APIRouter(
     tags=["Orders"]
 )
 
+from datetime import date, datetime, time
 
 # =========================================================
 # CREATE ORDER
@@ -413,17 +416,26 @@ async def create_order(
 # =========================================================
 # GET MY ORDERS
 # =========================================================
-
 @router.get(
     "",
-    response_model=list[OrderResponse]
+    response_model=PaginatedResponse[OrderResponse]
 )
 async def get_my_orders(
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
+    order_status: str | None = None,
+    payment_status: str | None = None,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
 ):
 
     try:
+
+        # -------------------------------------------------
+        # Base query
+        # -------------------------------------------------
 
         stmt = (
             select(Order)
@@ -433,251 +445,110 @@ async def get_my_orders(
             .where(
                 Order.user_id == current_user.id
             )
-            .order_by(
-                Order.created_at.desc()
+        )
+
+        count_stmt = (
+            select(func.count(Order.id))
+            .where(
+                Order.user_id == current_user.id
             )
+        )
+
+        # -------------------------------------------------
+        # DATE FILTERS
+        # -------------------------------------------------
+
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                Order.created_at >= from_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Order.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                Order.created_at <= to_datetime
+            )
+
+            count_stmt = count_stmt.where(
+                Order.created_at <= to_datetime
+            )
+
+        # -------------------------------------------------
+        # STATUS FILTERS
+        # -------------------------------------------------
+
+        if order_status is not None:
+
+            stmt = stmt.where(
+                Order.status == order_status.upper()
+            )
+
+            count_stmt = count_stmt.where(
+                Order.status == order_status.upper()
+            )
+
+        if payment_status is not None:
+
+            stmt = stmt.where(
+                Order.payment_status == (
+                    payment_status.upper()
+                )
+            )
+
+            count_stmt = count_stmt.where(
+                Order.payment_status == (
+                    payment_status.upper()
+                )
+            )
+
+        # -------------------------------------------------
+        # COUNT + PAGINATION
+        # -------------------------------------------------
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        stmt = (
+            stmt
+            .order_by(Order.created_at.desc())
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
 
         orders = result.scalars().all()
 
-        return orders
+        return {
+            "items": orders,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
         raise HTTPException(
             status_code=503,
-            detail="Database service temporarily unavailable"
-        )
-
-
-# =========================================================
-# GET ONE ORDER
-# =========================================================
-
-@router.get(
-    "/{order_id}",
-    response_model=OrderResponse
-)
-async def get_my_order(
-    order_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_active_user)
-):
-
-    try:
-
-        stmt = (
-            select(Order)
-            .options(
-                selectinload(Order.items)
+            detail=(
+                "Database service temporarily "
+                "unavailable"
             )
-            .where(
-                Order.id == order_id,
-                Order.user_id == current_user.id
-            )
-        )
-
-        result = await db.execute(stmt)
-
-        order = result.scalar_one_or_none()
-
-        if order is None:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Order not found"
-            )
-
-        return order
-
-    except HTTPException:
-
-        raise
-
-    except SQLAlchemyError:
-
-        raise HTTPException(
-            status_code=503,
-            detail="Database service temporarily unavailable"
-        )
-
-
-# =========================================================
-# CANCEL ORDER
-# =========================================================
-@router.patch(
-    "/{order_id}/cancel",
-    response_model=OrderResponse
-)
-async def cancel_order(
-    order_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_active_user)
-):
-
-    try:
-
-        # -------------------------------------------------
-        # Find the customer's order
-        # -------------------------------------------------
-
-        stmt = (
-            select(Order)
-            .options(
-                selectinload(Order.items)
-            )
-            .where(
-                Order.id == order_id,
-                Order.user_id == current_user.id
-            )
-        )
-
-        result = await db.execute(stmt)
-
-        order = result.scalar_one_or_none()
-
-        if order is None:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Order not found"
-            )
-
-        # -------------------------------------------------
-        # Only pending orders can currently be cancelled.
-        # -------------------------------------------------
-
-        if order.status not in ("PENDING_PAYMENT", "CONFIRMED"):
-
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                     "Only pending or confirmed "
-                     "orders can be cancelled"
-                )
-            )
-
-        # -------------------------------------------------
-        # Return stock to products
-        # -------------------------------------------------
-
-        for item in order.items:
-
-            product_stmt = select(Product).where(
-                Product.id == item.product_id
-            )
-
-            product_result = await db.execute(
-                product_stmt
-            )
-
-            product = product_result.scalar_one_or_none()
-
-            if product is not None:
-
-                product.stock += item.quantity
-
-        # -------------------------------------------------
-        # Update order status
-        # -------------------------------------------------
-
-        order.status = "CANCELLED"
-
-        # -------------------------------------------------
-        # Handle payment refund based on payment_status
-        # -------------------------------------------------
-        #
-        # PAID → initiate refund → REFUNDED
-        # UNPAID / FAILED → no refund needed
-        # COD → no refund (customer never paid online)
-        # -------------------------------------------------
-
-        if order.payment_status == "PAID":
-
-            # -----------------------------------------
-            # Find the successful payment record
-            # -----------------------------------------
-
-            payment_stmt = (
-                select(Payment)
-                .where(
-                    Payment.order_id == order.id,
-                    Payment.status == "SUCCESS"
-                )
-                .order_by(
-                    Payment.created_at.desc()
-                )
-                .limit(1)
-            )
-
-            payment_result = await db.execute(
-                payment_stmt
-            )
-
-            payment = payment_result.scalar_one_or_none()
-
-            if payment is not None:
-
-                # -------------------------------------
-                # Simulate refund
-                #
-                # Later replace with:
-                # razorpay_client.payment.refund(
-                #     payment.gateway_payment_id,
-                #     {"amount": int(payment.amount * 100)}
-                # )
-                # -------------------------------------
-
-                payment.status = "REFUNDED"
-                payment.gateway_status = "refunded"
-
-            # -----------------------------------------
-            # Update order payment status
-            # -----------------------------------------
-
-            order.payment_status = "REFUNDED"
-
-        # -------------------------------------------------
-        # Commit everything
-        # -------------------------------------------------
-
-        await db.commit()
-
-        # -------------------------------------------------
-        # Refresh order with items
-        # -------------------------------------------------
-
-        order_stmt = (
-            select(Order)
-            .options(
-                selectinload(Order.items)
-            )
-            .where(
-                Order.id == order.id
-            )
-        )
-
-        result = await db.execute(order_stmt)
-
-        order = result.scalar_one()
-
-        return order
-
-    except HTTPException:
-
-        await db.rollback()
-
-        raise
-
-    except SQLAlchemyError:
-
-        await db.rollback()
-
-        raise HTTPException(
-            status_code=503,
-            detail="Database service temporarily unavailable"
         )
 
 # =========================================================

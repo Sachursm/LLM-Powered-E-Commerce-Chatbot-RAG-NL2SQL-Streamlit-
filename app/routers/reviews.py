@@ -220,6 +220,8 @@ async def create_review(
 )
 async def get_product_reviews(
     product_id: int,
+    skip: int = 0,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db)
 ):
 
@@ -243,6 +245,19 @@ async def get_product_reviews(
                 detail="Product not found"
             )
 
+        # Count
+        count_stmt = (
+            select(func.count(Review.id))
+            .where(
+                Review.product_id == product_id
+            )
+        )
+
+        count_result = await db.execute(count_stmt)
+
+        total = count_result.scalar()
+
+        # Query with pagination
         stmt = (
             select(Review, User.username)
             .join(
@@ -255,6 +270,8 @@ async def get_product_reviews(
             .order_by(
                 Review.created_at.desc()
             )
+            .offset(skip)
+            .limit(limit)
         )
 
         result = await db.execute(stmt)
@@ -279,15 +296,23 @@ async def get_product_reviews(
             "product_id": product.id,
             "product_name": product.name,
             "average_rating": product.rating,
-            "total_reviews": product.ratings_count,
-            "reviews": reviews
+            "total_reviews": total,
+            "reviews": {
+                "items": reviews,
+                "total": total,
+                "skip": skip,
+                "limit": limit,
+                "has_more": (skip + limit) < total
+            }
         }
 
     except HTTPException:
 
         raise
 
-    except SQLAlchemyError:
+    except SQLAlchemyError as e:
+
+        print(f"DB ERROR: {e}")
 
         raise HTTPException(
             status_code=503,
@@ -296,7 +321,6 @@ async def get_product_reviews(
                 "unavailable"
             )
         )
-
 
 # =========================================================
 # UPDATE MY REVIEW

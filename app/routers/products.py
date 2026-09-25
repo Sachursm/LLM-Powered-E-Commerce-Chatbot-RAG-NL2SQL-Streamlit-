@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 from app.database.dependencies import get_db
 from app.database.models.category import Category
@@ -16,6 +17,8 @@ from app.schemas.product import (
     ProductResponse,
     ProductUpdate
 )
+from app.schemas.pagination import PaginatedResponse
+
 
 from app.core.security import require_admin
 
@@ -49,10 +52,9 @@ router = APIRouter(
 #
 # Therefore ALL products can be displayed.
 # =========================================================
-
 @router.get(
     "/",
-    response_model=list[ProductResponse]
+    response_model=PaginatedResponse[ProductResponse]
 )
 async def get_products(
     category: str | None = None,
@@ -60,9 +62,15 @@ async def get_products(
     max_price: float | None = None,
     search: str | None = None,
     sort_by: str | None = None,
+    skip: int = 0,
+    limit: int = 20,
     db: AsyncSession = Depends(get_db)
 ):
     try:
+
+        # -------------------------------------------------
+        # Base query
+        # -------------------------------------------------
 
         stmt = (
             select(
@@ -76,13 +84,25 @@ async def get_products(
         )
 
         # -------------------------------------------------
+        # Count query (same filters, no pagination)
+        # -------------------------------------------------
+
+        count_stmt = select(func.count(Product.id))
+
+        # -------------------------------------------------
         # SEARCH FILTER
         # -------------------------------------------------
 
         if search is not None:
 
             stmt = stmt.where(
-                Product.name.ilike(f"%{search}%")
+                Product.name.ilike(f"%{search}%") |
+                Product.description.ilike(f"%{search}%")
+            )
+
+            count_stmt = count_stmt.where(
+                Product.name.ilike(f"%{search}%") |
+                Product.description.ilike(f"%{search}%")
             )
 
         # -------------------------------------------------
@@ -102,6 +122,17 @@ async def get_products(
                 )
             )
 
+            count_stmt = (
+                count_stmt
+                .join(
+                    Category,
+                    Category.id == Product.category_id
+                )
+                .where(
+                    Category.name == category
+                )
+            )
+
         # -------------------------------------------------
         # MINIMUM PRICE FILTER
         # -------------------------------------------------
@@ -112,6 +143,10 @@ async def get_products(
                 Product.price >= min_price
             )
 
+            count_stmt = count_stmt.where(
+                Product.price >= min_price
+            )
+
         # -------------------------------------------------
         # MAXIMUM PRICE FILTER
         # -------------------------------------------------
@@ -119,6 +154,10 @@ async def get_products(
         if max_price is not None:
 
             stmt = stmt.where(
+                Product.price <= max_price
+            )
+
+            count_stmt = count_stmt.where(
                 Product.price <= max_price
             )
 
@@ -148,11 +187,29 @@ async def get_products(
 
             stmt = stmt.order_by(Product.id.asc())
 
+        # -------------------------------------------------
+        # GET TOTAL COUNT
+        # -------------------------------------------------
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        # -------------------------------------------------
+        # APPLY PAGINATION
+        # -------------------------------------------------
+
+        stmt = stmt.offset(skip).limit(limit)
+
         result = await db.execute(stmt)
 
         rows = result.all()
 
-        return [
+        # -------------------------------------------------
+        # BUILD RESPONSE
+        # -------------------------------------------------
+
+        items = [
             ProductResponse(
                 id=product.id,
                 source_product_id=product.source_product_id,
@@ -169,12 +226,21 @@ async def get_products(
             for product, seller_id in rows
         ]
 
+        return {
+            "items": items,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
+
     except SQLAlchemyError:
 
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
+
 
 # =========================================================
 # GET SINGLE PRODUCT

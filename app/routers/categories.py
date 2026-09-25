@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import select,func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.schemas.category import (
     CategoryCreate,
     CategoryUpdate
 )
+from app.schemas.pagination import PaginatedResponse
 from app.database.models.audit_log import AuditLog
 from app.database.models.product import Product
 from app.core.security import require_admin_or_seller
@@ -31,67 +32,48 @@ router = APIRouter(
 
 @router.get(
     "/",
-    response_model=list[CategoryResponse]
+    response_model=PaginatedResponse[CategoryResponse]
 )
 async def get_categories(
+    skip: int = 0,
+    limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
     try:
-        stmt = select(Category).order_by(Category.name)
 
-        # Execute the query asynchronously
+        # Count
+        count_stmt = select(func.count(Category.id))
+
+        total_result = await db.execute(count_stmt)
+
+        total = total_result.scalar()
+
+        # Query
+        stmt = (
+            select(Category)
+            .order_by(Category.name)
+            .offset(skip)
+            .limit(limit)
+        )
+
         result = await db.execute(stmt)
 
-        # Convert the result into Category objects
         categories = result.scalars().all()
 
-        return categories
+        return {
+            "items": categories,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
+
         raise HTTPException(
             status_code=503,
             detail="Database service temporarily unavailable"
         )
-
-
-# ---------------------------------------------------------
-# GET CATEGORY BY NAME
-# ---------------------------------------------------------
-# Allows the user to request a category using its name.
-# ---------------------------------------------------------
-
-@router.get(
-    "/by-name/{category_name}",
-    response_model=CategoryResponse
-)
-async def get_category_by_name(
-    category_name: str,
-    db: AsyncSession = Depends(get_db)
-):
-    try:
-        stmt = select(Category).where(
-            Category.name == category_name
-        )
-
-        # Execute query asynchronously
-        result = await db.execute(stmt)
-
-        category = result.scalar_one_or_none()
-
-        if category is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Category not found"
-            )
-
-        return category
-
-    except SQLAlchemyError:
-        raise HTTPException(
-            status_code=503,
-            detail="Database service temporarily unavailable"
-        )
-
 
 # ---------------------------------------------------------
 # CREATE CATEGORY

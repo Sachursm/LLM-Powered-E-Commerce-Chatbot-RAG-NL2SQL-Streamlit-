@@ -18,3 +18,5 @@ pwdlib[argon2]
 python-multipart
 aiosqlite
 razorpay
+python-telegram-bot
+httpx

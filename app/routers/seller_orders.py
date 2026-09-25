@@ -26,6 +26,12 @@ from app.schemas.shipment import ShipmentResponse
 
 from app.core.security import require_admin_or_seller
 
+from datetime import date, datetime, time
+
+from sqlalchemy import func
+
+from app.schemas.pagination import PaginatedResponse
+
 router = APIRouter(
     prefix="/seller/orders",
     tags=["Seller Orders"]
@@ -93,14 +99,16 @@ class SellerOrderResponse(BaseModel):
 # each order.
 #
 # =========================================================
-
 @router.get(
     "",
-    response_model=list[SellerOrderResponse]
 )
 async def get_seller_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller),
+    skip: int = 0,
+    limit: int = 20,
+    from_date: date | None = None,
+    to_date: date | None = None,
     order_id: int | None = Query(
         None, description="Filter by order ID"
     ),
@@ -119,10 +127,6 @@ async def get_seller_orders(
 ):
 
     try:
-
-        # -------------------------------------------------
-        # Find all order items owned by this seller
-        # -------------------------------------------------
 
         stmt = (
             select(
@@ -143,9 +147,25 @@ async def get_seller_orders(
             )
         )
 
-        # -------------------------------------------------
-        # Apply filters
-        # -------------------------------------------------
+        if from_date is not None:
+
+            from_datetime = datetime.combine(
+                from_date, time.min
+            )
+
+            stmt = stmt.where(
+                Order.created_at >= from_datetime
+            )
+
+        if to_date is not None:
+
+            to_datetime = datetime.combine(
+                to_date, time.max
+            )
+
+            stmt = stmt.where(
+                Order.created_at <= to_datetime
+            )
 
         if order_id is not None:
 
@@ -179,10 +199,6 @@ async def get_seller_orders(
                 Order.user_id == customer_id
             )
 
-        # -------------------------------------------------
-        # Order by most recent first
-        # -------------------------------------------------
-
         stmt = stmt.order_by(
             Order.created_at.desc()
         )
@@ -191,16 +207,8 @@ async def get_seller_orders(
 
         rows = result.all()
 
-        # -------------------------------------------------
         # Group items by order
-        # -------------------------------------------------
-        #
-        # Multiple order items can belong to the same
-        # order. We group them so the response shows
-        # one order object with a list of items.
-        # -------------------------------------------------
-
-        orders_dict: dict[int, SellerOrderResponse] = {}
+        orders_dict = {}
 
         for order_item, order, product_name in rows:
 
@@ -233,7 +241,19 @@ async def get_seller_orders(
                 )
             )
 
-        return list(orders_dict.values())
+        all_orders = list(orders_dict.values())
+
+        total = len(all_orders)
+
+        paginated = all_orders[skip:skip + limit]
+
+        return {
+            "items": paginated,
+            "total": total,
+            "skip": skip,
+            "limit": limit,
+            "has_more": (skip + limit) < total
+        }
 
     except SQLAlchemyError:
 
@@ -244,7 +264,6 @@ async def get_seller_orders(
                 "unavailable"
             )
         )
-
 
 # =========================================================
 # GET SINGLE SELLER ORDER
