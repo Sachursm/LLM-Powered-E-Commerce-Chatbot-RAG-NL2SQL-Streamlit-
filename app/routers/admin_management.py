@@ -174,8 +174,8 @@ async def get_all_orders(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     order_status: str | None = Query(
@@ -575,8 +575,8 @@ async def get_all_shipments(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     status_filter: str | None = Query(
@@ -975,7 +975,8 @@ async def get_audit_logs(
         None, description="Filter by actor user ID"
     ),
     limit: int = Query(
-        50, description="Number of results"
+        default=20, ge=1, le=100,
+        description="Number of results"
     )
 ):
 
@@ -1211,8 +1212,8 @@ async def get_all_payouts(
     request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     status_filter: str | None = Query(

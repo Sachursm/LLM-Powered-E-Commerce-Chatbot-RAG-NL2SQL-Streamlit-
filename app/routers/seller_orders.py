@@ -59,8 +59,8 @@ router = APIRouter(
 async def get_seller_orders(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     order_id: int | None = Query(

@@ -1,5 +1,5 @@
 from fastapi import (
-    APIRouter, Depends, HTTPException, Request, status
+    APIRouter, Depends, HTTPException, Query, Request, status
 )
 
 from sqlalchemy import select, func
@@ -225,8 +225,8 @@ async def create_review(
 async def get_product_reviews(
     request: Request,
     product_id: int,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
 

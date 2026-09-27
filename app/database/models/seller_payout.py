@@ -2,7 +2,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     ForeignKey, String, DateTime,
-    Float, Text
+    Float, Text, UniqueConstraint
 )
 from sqlalchemy.orm import (
     Mapped, mapped_column, relationship
@@ -60,6 +60,12 @@ class SellerCommission(Base):
 
 class SellerPayout(Base):
     __tablename__ = "seller_payouts"
+    __table_args__ = (
+        UniqueConstraint(
+            "order_item_id",
+            name="uq_seller_payouts_order_item_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(
         primary_key=True

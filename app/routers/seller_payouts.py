@@ -231,8 +231,8 @@ async def update_bank_details(
 async def get_my_payouts(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin_or_seller),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     status_filter: str | None = Query(

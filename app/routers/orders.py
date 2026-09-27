@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from sqlalchemy import select, update,func
 from sqlalchemy.exc import SQLAlchemyError
@@ -426,8 +426,8 @@ async def create_order(
 @limiter.limit("20/minute", key_func=get_user_key)
 async def get_my_orders(
     request: Request,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     order_status: str | None = None,

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
@@ -65,8 +65,8 @@ async def get_products(
     max_price: float | None = None,
     search: str | None = None,
     sort_by: str | None = None,
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     db: AsyncSession = Depends(get_db)
 ):
     try:

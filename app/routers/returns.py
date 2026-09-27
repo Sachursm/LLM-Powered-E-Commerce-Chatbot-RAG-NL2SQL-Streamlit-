@@ -1,7 +1,7 @@
 import json
 
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query, status
+    APIRouter, Depends, HTTPException, Query, Request, status
 )
 
 from sqlalchemy import select,func
@@ -39,6 +39,7 @@ from app.core.security import (
     require_active_user,
     require_admin
 )
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -308,11 +309,13 @@ async def get_my_returns(
     "/admin/returns",
     response_model=PaginatedResponse[ReturnRequestResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_all_returns(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
-    skip: int = 0,
-    limit: int = 20,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=20, ge=1, le=100),
     from_date: date | None = None,
     to_date: date | None = None,
     status_filter: str | None = Query(
@@ -432,7 +435,9 @@ async def get_all_returns(
 @router.get(
     "/admin/returns/{return_id}"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_return_detail(
+    request: Request,
     return_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -572,7 +577,9 @@ async def get_return_detail(
 @router.patch(
     "/admin/returns/{return_id}/approve"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def approve_return(
+    request: Request,
     return_id: int,
     approve_data: ReturnApprove,
     db: AsyncSession = Depends(get_db),
@@ -795,7 +802,9 @@ async def approve_return(
 @router.patch(
     "/admin/returns/{return_id}/reject"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def reject_return(
+    request: Request,
     return_id: int,
     reject_data: ReturnReject,
     db: AsyncSession = Depends(get_db),
@@ -872,7 +881,9 @@ async def reject_return(
 @router.post(
     "/admin/returns/{return_id}/complete"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def complete_return(
+    request: Request,
     return_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -1125,7 +1136,9 @@ async def complete_return(
 @router.get(
     "/admin/returns/{return_id}/return-bill"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_return_bill(
+    request: Request,
     return_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)

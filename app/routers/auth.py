@@ -22,7 +22,7 @@ from app.core.security import (
     create_access_token
 )
 
-import random
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from app.database.models.otp import OTP
@@ -172,7 +172,9 @@ async def login(
     response_model=SellerResponse,
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("3/minute", key_func=get_remote_address)
 async def register_seller(
+    request: Request,
     seller_data: SellerCreate,
     db: AsyncSession = Depends(get_db)
 ):
@@ -261,11 +263,9 @@ async def forgot_password(
         user = result.scalar_one_or_none()
 
         if user is None:
-
-            raise HTTPException(
-                status_code=404,
-                detail="Email not found"
-            )
+            return {
+                "message": "If this email exists, an OTP has been sent"
+            }
 
         # -------------------------------------------------
         # Delete any existing OTPs for this email
@@ -286,9 +286,7 @@ async def forgot_password(
         # Generate 6-digit OTP
         # -------------------------------------------------
 
-        otp_code = str(random.randint(
-            100000, 999999
-        ))
+        otp_code = str(secrets.randbelow(900000) + 100000)
 
         # -------------------------------------------------
         # Store OTP with 10 minute expiry
@@ -316,14 +314,10 @@ async def forgot_password(
         )
 
         if not email_sent:
-
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to send OTP email"
-            )
+            print("FORGOT PASSWORD OTP email could not be sent")
 
         return {
-            "message": "OTP sent to your email"
+            "message": "If this email exists, an OTP has been sent"
         }
 
     except HTTPException:
@@ -366,12 +360,12 @@ async def resend_otp(
 
         user_result = await db.execute(user_stmt)
 
-        if user_result.scalar_one_or_none() is None:
+        user = user_result.scalar_one_or_none()
 
-            raise HTTPException(
-                status_code=404,
-                detail="Email not found"
-            )
+        if user is None:
+            return {
+                "message": "If this email exists, an OTP has been sent"
+            }
 
         # -------------------------------------------------
         # Delete old OTPs
@@ -392,9 +386,7 @@ async def resend_otp(
         # Generate new OTP
         # -------------------------------------------------
 
-        otp_code = str(random.randint(
-            100000, 999999
-        ))
+        otp_code = str(secrets.randbelow(900000) + 100000)
 
         otp = OTP(
             email=email,
@@ -418,14 +410,10 @@ async def resend_otp(
         )
 
         if not email_sent:
-
-            raise HTTPException(
-                status_code=500,
-                detail="Failed to send OTP email"
-            )
+            print("RESEND OTP email could not be sent")
 
         return {
-            "message": "New OTP sent to your email"
+            "message": "If this email exists, an OTP has been sent"
         }
 
     except HTTPException:

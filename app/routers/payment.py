@@ -208,12 +208,11 @@ async def create_checkout(
     except Exception as e:
 
         await db.rollback()
+        print(f"PAYMENT ERROR: {e}")
 
         raise HTTPException(
             status_code=502,
-            detail=(
-                f"Payment gateway error: {str(e)}"
-            )
+            detail="Payment processing failed. Please try again."
         )
 
 
@@ -378,6 +377,17 @@ async def razorpay_webhook(
                     )
 
                     for item in order_items:
+
+                        existing_payout_result = await db.execute(
+                            select(SellerPayout.id)
+                            .where(
+                                SellerPayout.order_item_id == item.id
+                            )
+                            .limit(1)
+                        )
+
+                        if existing_payout_result.scalar_one_or_none() is not None:
+                            continue
 
                         comm_stmt = (
                             select(SellerCommission)
