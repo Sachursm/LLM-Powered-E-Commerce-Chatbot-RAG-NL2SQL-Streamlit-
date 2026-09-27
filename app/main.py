@@ -1,4 +1,9 @@
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
+from app.core.rate_limit import limiter
 
 from app.routers.products import router as products_router
 from app.routers.categories import router as categories_router
@@ -25,6 +30,9 @@ app = FastAPI(
     title="E-Commerce API",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 
 @app.get("/")

@@ -10,6 +10,8 @@ class Settings(BaseSettings):
 
     ADMIN_BOOTSTRAP_SECRET: str
 
+    REDIS_URL: str = "redis://localhost:6379/0"
+
     RAZORPAY_KEY_ID: str
     RAZORPAY_KEY_SECRET: str
 

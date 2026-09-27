@@ -20,3 +20,5 @@ aiosqlite
 razorpay
 python-telegram-bot
 httpx
+slowapi
+redis
