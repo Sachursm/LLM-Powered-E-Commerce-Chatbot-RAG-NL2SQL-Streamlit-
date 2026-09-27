@@ -29,6 +29,9 @@ def get_user_key(request: Request) -> str:
 limiter = Limiter(
     key_func=get_user_key,
     storage_uri=settings.REDIS_URL,
-    headers_enabled=True,
+    # Routes currently return regular Python values and don't accept a
+    # Starlette Response parameter, so SlowAPI cannot inject limit headers.
+    # Rate-limit enforcement and 429 handling remain enabled without headers.
+    headers_enabled=False,
     strategy="fixed-window",
 )
