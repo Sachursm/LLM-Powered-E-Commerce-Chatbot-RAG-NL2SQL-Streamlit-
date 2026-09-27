@@ -1,13 +1,14 @@
 from typing import Literal
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import require_admin
+from app.core.rate_limit import limiter, get_user_key
 from app.database.dependencies import get_db
 from app.database.models.user import User
 from app.database.models.audit_log import AuditLog
@@ -30,7 +31,9 @@ router = APIRouter(
     "/users",
     response_model=list[UserResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_users(
+    request: Request,
     role: Literal["USER", "SELLER", "ADMIN"] | None = Query(
         default=None
     ),
@@ -68,7 +71,9 @@ async def get_users(
     "/users/{user_id}/role",
     response_model=UserResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def update_user_role(
+    request: Request,
     user_id: int,
     role_data: RoleUpdate,
     db: AsyncSession = Depends(get_db),
@@ -164,7 +169,9 @@ async def update_user_role(
     "/users/{user_id}/deactivate",
     response_model=UserResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def deactivate_user(
+    request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -252,7 +259,9 @@ async def deactivate_user(
     "/users/{user_id}/activate",
     response_model=UserResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def activate_user(
+    request: Request,
     user_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -320,7 +329,9 @@ async def activate_user(
     "/reactivation-requests",
     response_model=list[ReactivationRequestResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_reactivation_requests(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -357,7 +368,9 @@ async def get_reactivation_requests(
 @router.post(
     "/reactivation-requests/{request_id}/approve"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def approve_reactivation_request(
+    request: Request,
     request_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -447,7 +460,9 @@ async def approve_reactivation_request(
 @router.post(
     "/reactivation-requests/{request_id}/reject"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def reject_reactivation_request(
+    request: Request,
     request_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from sqlalchemy import select, update,func
 from sqlalchemy.exc import SQLAlchemyError
@@ -31,6 +31,7 @@ from app.schemas.order import (
 from app.schemas.pagination import PaginatedResponse
 
 from app.core.security import require_active_user
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -49,7 +50,9 @@ from datetime import date, datetime, time
     response_model=OrderResponse,
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("5/minute", key_func=get_user_key)
 async def create_order(
+    request: Request,
     order_data: CreateOrderRequest,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
@@ -420,7 +423,9 @@ async def create_order(
     "",
     response_model=PaginatedResponse[OrderResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_my_orders(
+    request: Request,
     skip: int = 0,
     limit: int = 20,
     from_date: date | None = None,

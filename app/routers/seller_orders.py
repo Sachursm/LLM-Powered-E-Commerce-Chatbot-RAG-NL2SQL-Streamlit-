@@ -22,6 +22,10 @@ from app.database.models.shipment import (
 from app.database.models.address import Address
 
 from app.schemas.shipment import ShipmentResponse
+from app.schemas.seller_order import (
+    SellerOrderItemDetail,
+    SellerOrderResponse,
+)
 
 
 from app.core.security import require_admin_or_seller
@@ -36,56 +40,6 @@ router = APIRouter(
     prefix="/seller/orders",
     tags=["Seller Orders"]
 )
-
-
-# =========================================================
-# SELLER ORDER ITEM RESPONSE
-# =========================================================
-#
-# We define this here because the seller sees a
-# different view than the customer.
-#
-# The seller sees:
-#   - order info
-#   - only THEIR order items
-#   - product name
-#   - customer id
-#
-# The seller does NOT see:
-#   - other sellers' items
-#   - other sellers' info
-#
-# =========================================================
-
-from pydantic import BaseModel, ConfigDict
-from datetime import datetime
-
-
-class SellerOrderItemDetail(BaseModel):
-    id: int
-    order_id: int
-    product_id: int
-    product_name: str
-    quantity: int
-    unit_price: float
-    created_at: datetime
-
-    model_config = ConfigDict(
-        from_attributes=True
-    )
-
-
-class SellerOrderResponse(BaseModel):
-    order_id: int
-    customer_id: int
-    order_status: str
-    payment_status: str
-    order_created_at: datetime
-    items: list[SellerOrderItemDetail]
-
-    model_config = ConfigDict(
-        from_attributes=True
-    )
 
 
 # =========================================================

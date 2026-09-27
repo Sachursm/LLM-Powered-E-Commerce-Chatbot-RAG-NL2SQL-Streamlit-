@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select,func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from app.database.models.audit_log import AuditLog
 from app.database.models.product import Product
 from app.core.security import require_admin_or_seller
 from app.database.models.user import User
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -34,7 +35,9 @@ router = APIRouter(
     "/",
     response_model=PaginatedResponse[CategoryResponse]
 )
+@limiter.limit("30/minute", key_func=get_user_key)
 async def get_categories(
+    request: Request,
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db)

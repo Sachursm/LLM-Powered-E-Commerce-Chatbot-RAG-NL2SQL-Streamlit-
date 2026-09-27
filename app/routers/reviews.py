@@ -1,5 +1,5 @@
 from fastapi import (
-    APIRouter, Depends, HTTPException, status
+    APIRouter, Depends, HTTPException, Request, status
 )
 
 from sqlalchemy import select, func
@@ -21,6 +21,7 @@ from app.schemas.review import (
 )
 
 from app.core.security import require_active_user
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -37,7 +38,9 @@ router = APIRouter(
     response_model=ReviewResponse,
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("5/minute", key_func=get_user_key)
 async def create_review(
+    request: Request,
     order_id: int,
     item_id: int,
     review_data: ReviewCreate,
@@ -218,7 +221,9 @@ async def create_review(
 @router.get(
     "/products/{product_id}/reviews"
 )
+@limiter.limit("30/minute", key_func=get_user_key)
 async def get_product_reviews(
+    request: Request,
     product_id: int,
     skip: int = 0,
     limit: int = 20,

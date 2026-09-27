@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
@@ -21,6 +21,7 @@ from app.schemas.pagination import PaginatedResponse
 
 
 from app.core.security import require_admin
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -56,7 +57,9 @@ router = APIRouter(
     "/",
     response_model=PaginatedResponse[ProductResponse]
 )
+@limiter.limit("30/minute", key_func=get_user_key)
 async def get_products(
+    request: Request,
     category: str | None = None,
     min_price: float | None = None,
     max_price: float | None = None,
@@ -261,7 +264,9 @@ async def get_products(
     "/{product_id}",
     response_model=ProductResponse
 )
+@limiter.limit("30/minute", key_func=get_user_key)
 async def get_product(
+    request: Request,
     product_id: int,
     db: AsyncSession = Depends(get_db)
 ):

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 
 from sqlalchemy import select
@@ -9,6 +9,7 @@ from app.database.dependencies import get_db
 from app.database.models.user import User
 
 from app.schemas.seller import SellerCreate, SellerResponse
+from app.schemas.auth import ResetPasswordRequest
 from app.schemas.user import (
     UserCreate,
     UserResponse,
@@ -26,6 +27,8 @@ from datetime import datetime, timedelta, timezone
 
 from app.database.models.otp import OTP
 from app.services.email import send_otp_email
+from app.core.rate_limit import limiter
+from slowapi.util import get_remote_address
 
 router = APIRouter(
     prefix="/auth",
@@ -38,7 +41,9 @@ router = APIRouter(
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("3/minute", key_func=get_remote_address)
 async def register(
+    request: Request,
     user_data: UserCreate,
     db: AsyncSession = Depends(get_db)
 ):
@@ -102,7 +107,9 @@ async def register(
     "/login",
     response_model=TokenResponse
 )
+@limiter.limit("5/minute", key_func=get_remote_address)
 async def login(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db)
 ):
@@ -232,7 +239,9 @@ async def register_seller(
 # =========================================================
 
 @router.post("/forgot-password")
+@limiter.limit("3/minute", key_func=get_remote_address)
 async def forgot_password(
+    request: Request,
     email: str,
     db: AsyncSession = Depends(get_db)
 ):
@@ -441,17 +450,10 @@ async def resend_otp(
 # RESET PASSWORD — Verify OTP + Set New Password
 # =========================================================
 
-from pydantic import BaseModel
-
-
-class ResetPasswordRequest(BaseModel):
-    email: str
-    otp: str
-    new_password: str
-
-
 @router.post("/reset-password")
+@limiter.limit("5/minute", key_func=get_remote_address)
 async def reset_password(
+    request: Request,
     reset_data: ResetPasswordRequest,
     db: AsyncSession = Depends(get_db)
 ):

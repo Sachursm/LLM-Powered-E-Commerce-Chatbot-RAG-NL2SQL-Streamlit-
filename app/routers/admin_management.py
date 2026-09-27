@@ -1,5 +1,5 @@
 from fastapi import (
-    APIRouter, Depends, HTTPException, Query
+    APIRouter, Depends, HTTPException, Query, Request
 )
 
 from sqlalchemy import select, func
@@ -41,6 +41,7 @@ from app.schemas.seller_payout import (
     PayoutHold
 )
 from app.core.security import require_admin
+from app.core.rate_limit import limiter, get_user_key
 
 from sqlalchemy.orm import selectinload
 
@@ -60,7 +61,9 @@ router = APIRouter(
 # =========================================================
 
 @router.get("/dashboard")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def admin_dashboard(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -166,7 +169,9 @@ async def admin_dashboard(
     "/orders",
     response_model=PaginatedResponse[OrderResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_all_orders(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
     skip: int = 0,
@@ -294,7 +299,9 @@ async def get_all_orders(
 # =========================================================
 
 @router.get("/orders/{order_id}")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_order_detail(
+    request: Request,
     order_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -498,7 +505,9 @@ async def get_order_detail(
     "/payments",
     response_model=list[PaymentResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_all_payments(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
     status_filter: str | None = Query(
@@ -561,7 +570,9 @@ async def get_all_payments(
 # ALL SHIPMENTS (with filters)
 # =========================================================
 @router.get("/shipments")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_all_shipments(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
     skip: int = 0,
@@ -764,7 +775,9 @@ async def get_all_shipments(
 # =========================================================
 
 @router.get("/shipments/{shipment_id}")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_shipment_detail(
+    request: Request,
     shipment_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -947,7 +960,9 @@ async def get_shipment_detail(
 # =========================================================
 
 @router.get("/audit-logs")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_audit_logs(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
     target_type: str | None = Query(
@@ -1035,7 +1050,9 @@ async def get_audit_logs(
     "/sellers/{seller_id}/commission",
     response_model=CommissionResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def set_commission_rate(
+    request: Request,
     seller_id: int,
     commission_data: CommissionUpdate,
     db: AsyncSession = Depends(get_db),
@@ -1134,7 +1151,9 @@ async def set_commission_rate(
     "/sellers/{seller_id}/commission",
     response_model=CommissionResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_commission_rate(
+    request: Request,
     seller_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -1187,7 +1206,9 @@ async def get_commission_rate(
     "/payouts",
     response_model=PaginatedResponse[SellerPayoutResponse]
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_all_payouts(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin),
     skip: int = 0,
@@ -1295,7 +1316,9 @@ async def get_all_payouts(
 # =========================================================
 
 @router.post("/payouts/check-eligible")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def check_eligible_payouts(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -1353,7 +1376,9 @@ async def check_eligible_payouts(
 # =========================================================
 
 @router.get("/payouts/summary")
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_admin_payout_summary(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
 ):
@@ -1456,7 +1481,9 @@ async def get_admin_payout_summary(
 @router.post(
     "/payouts/{payout_id}/process"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def process_payout(
+    request: Request,
     payout_id: int,
     process_data: PayoutProcess,
     db: AsyncSession = Depends(get_db),
@@ -1578,7 +1605,9 @@ async def process_payout(
 @router.post(
     "/payouts/{payout_id}/hold"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def hold_payout(
+    request: Request,
     payout_id: int,
     hold_data: PayoutHold,
     db: AsyncSession = Depends(get_db),
@@ -1651,7 +1680,9 @@ async def hold_payout(
 @router.post(
     "/payouts/{payout_id}/release"
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def release_payout(
+    request: Request,
     payout_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)
@@ -1723,7 +1754,9 @@ async def release_payout(
     "/sellers/{seller_id}/bank",
     response_model=SellerBankResponse
 )
+@limiter.limit("20/minute", key_func=get_user_key)
 async def get_seller_bank(
+    request: Request,
     seller_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_admin)

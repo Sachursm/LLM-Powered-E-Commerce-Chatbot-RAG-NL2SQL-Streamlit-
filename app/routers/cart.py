@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from app.schemas.cart_item import (
 )
 
 from app.core.security import require_active_user
+from app.core.rate_limit import limiter, get_user_key
 
 
 router = APIRouter(
@@ -31,7 +32,9 @@ router = APIRouter(
     response_model=CartItemResponse,
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("15/minute", key_func=get_user_key)
 async def add_cart_item(
+    request: Request,
     item_data: CartItemCreate,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)

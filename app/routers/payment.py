@@ -31,6 +31,7 @@ from app.database.models.seller_payout import (
 from app.schemas.payment import PaymentResponse
 
 from app.core.security import require_active_user
+from app.core.rate_limit import limiter, get_user_key
 from app.core.config import settings
 
 
@@ -60,7 +61,9 @@ router = APIRouter(
     "/{order_id}/checkout",
     status_code=status.HTTP_201_CREATED
 )
+@limiter.limit("3/minute", key_func=get_user_key)
 async def create_checkout(
+    request: Request,
     order_id: int,
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_active_user)
@@ -222,6 +225,7 @@ async def create_checkout(
     "/webhook",
     status_code=status.HTTP_200_OK
 )
+@limiter.exempt
 async def razorpay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db)
