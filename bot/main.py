@@ -63,6 +63,8 @@ def main() -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         level=logging.INFO,
     )
+    # HTTPX logs the full Telegram Bot API URL at INFO, including the token.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     logger.info("Starting SachuMart Telegram bot")
     build_application().run_polling(allowed_updates=Update.ALL_TYPES)
 
