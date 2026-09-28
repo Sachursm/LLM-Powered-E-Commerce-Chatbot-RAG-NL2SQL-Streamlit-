@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 from bot.config import settings
 
 
-SESSION_TTL_SECONDS = 24 * 60 * 60
+SESSION_TTL_SECONDS = 30 * 60
 _redis = Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
 
