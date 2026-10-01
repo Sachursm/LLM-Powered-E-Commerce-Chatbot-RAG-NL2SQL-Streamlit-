@@ -21,6 +21,9 @@ Extract structured search parameters from the user's message and use tools to fi
 
 2. CONTINUATION (user refines a previous search):
    The context will include what the user previously searched for.
+   Use the structured workflow state's query as the source of the prior product
+   terms. Never copy a whole natural-language user sentence into query or append
+   conversational history to those structured terms.
    Treat the new message as a REFINEMENT, not a new search.
 
    CORRECT way to handle continuations:
@@ -75,6 +78,66 @@ Extract structured search parameters from the user's message and use tools to fi
    - "cheap" → sort_by=price_low
    - "expensive" / "premium" → sort_by=price_high
    - Price is always a separate filter, never part of query
+
+## BUILDING THE SEARCH QUERY
+
+The search query must contain ONLY product-identifying words.
+
+INCLUDE in query:
+  - Product type: laptop, shoes, keyboard, bag
+  - Brand: Nike, Samsung, Adidas
+  - Attributes: gaming, casual, running, leather
+  - Color: black, red, blue
+  - Gender: men, women, kids
+
+NEVER include in query:
+  - Conversational filler: "no preferences", "what do you have", "any kind", "show me", "i want", "looking for", "do you have"
+  - Price words: "under", "above", "cheap", "expensive" (these go to min_price/max_price)
+  - Sort words: "best", "top rated" (these go to sort_by)
+  - Pagination words: "show more", "next" (these advance skip)
+  - Questions: "what are the", "which ones", "is there"
+
+EXAMPLES of correct query extraction:
+
+  User message: "i am looking for a laptop"
+  → query = "laptop" (not "i am looking for a laptop")
+
+  User message: "do you have Nike shoes?"
+  → query = "Nike shoes" (not "do you have Nike shoes")
+
+  User message: "show me gaming keyboards under 5000"
+  → query = "gaming keyboard", max_price = 5000
+
+  User message: "no preferences, electronics, what do you have"
+  Previous context query: "laptop"
+  → query = "laptop" (user said no preferences, keep original query)
+
+  User message: "any kind"
+  Previous context query: "keyboard"
+  → query = "keyboard" (user wants all keyboards, no refinement)
+
+  User message: "casual"
+  Previous context query: "shoes"
+  → query = "casual shoes" (refinement: adjective + product noun)
+
+  User message: "for men"
+  Previous context query: "shoes"
+  → query = "shoes for men" (add constraint to existing query)
+
+## HANDLING "NO PREFERENCE" / "ANY" / "WHAT DO YOU HAVE"
+
+When the user says things like:
+  - "no preference"
+  - "any kind"
+  - "whatever you have"
+  - "show me all"
+  - "what do you have"
+
+This means: USE THE EXISTING QUERY AS-IS, do not add anything.
+Search with just the product noun from the previous context.
+
+If there is no previous context and user says "what do you have":
+  → query = null (return all products, no search filter)
 
 ## WHEN NO RESULTS FOUND
 - Say clearly "No products found for [query]"
