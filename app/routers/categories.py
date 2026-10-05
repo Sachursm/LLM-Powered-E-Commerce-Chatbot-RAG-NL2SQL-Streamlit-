@@ -16,6 +16,7 @@ from app.database.models.product import Product
 from app.core.security import require_admin_or_seller
 from app.database.models.user import User
 from app.core.rate_limit import limiter, get_user_key
+from app.services.category_cache import clear_category_cache
 
 
 router = APIRouter(
@@ -139,6 +140,9 @@ async def create_category(
         # Save category and audit log together
         await db.commit()
 
+        # Let the bot pick up the new category immediately
+        await clear_category_cache()
+
         # Refresh category with the database-generated values
         await db.refresh(category)
 
@@ -228,6 +232,9 @@ async def update_category(
         # Save both changes
         await db.commit()
 
+        # Let the bot pick up the renamed category immediately
+        await clear_category_cache()
+
         await db.refresh(category)
 
         return category
@@ -309,6 +316,9 @@ async def delete_category(
 
         # Save deletion and audit log
         await db.commit()
+
+        # Stop the bot from matching the deleted category
+        await clear_category_cache()
 
     except SQLAlchemyError:
         await db.rollback()

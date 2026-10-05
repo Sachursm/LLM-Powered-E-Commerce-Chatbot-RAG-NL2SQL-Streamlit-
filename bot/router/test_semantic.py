@@ -110,10 +110,23 @@ POSITIVE_CASES = {
     "SELLER_PRODUCT": (
         "show my products",
         "list the products in my seller inventory",
+        "delete a product from my seller catalog",
+        "which items am I selling in my shop",
+        "remove one of my listings",
+    ),
+    "PRODUCT_CREATE": (
         "create a listing for a new item in my shop",
+        "I want to add a new product",
+        "add a new pair of shoes to the catalog",
+        "put a new item up for sale",
+        "create product Nike Air Zoom priced 4999",
+    ),
+    "PRODUCT_UPDATE": (
         "raise the price of one of my listed products",
         "change the stock count on my store listing",
-        "delete a product from my seller catalog",
+        "update the price of product 12 to 4500",
+        "edit the description of my product",
+        "change the category of product 30 to shoes",
     ),
     "SELLER_ORDER": (
         "show the orders customers placed for my products",
@@ -185,7 +198,6 @@ CONFUSING_CASES = (
         ("cancel my order", "ORDER_CANCEL"),
         ("show shoes under 5000", "PRODUCT_SEARCH"),
         ("show products", "PRODUCT_SEARCH"),
-        ("show my products", "SELLER_PRODUCT"),
         ("tell me about product 25", "PRODUCT_DETAIL"),
         ("show my products that I sell", "SELLER_PRODUCT"),
         ("show products in the shoes category", "CATEGORY"),
@@ -204,9 +216,21 @@ class SemanticRouterTests(unittest.TestCase):
         self.assertEqual(set(ROUTE_UTTERANCES), set(POSITIVE_CASES))
         for intent, queries in POSITIVE_CASES.items():
             self.assertGreaterEqual(len(queries), 5)
+            if intent.startswith("SELLER_") or intent in {"PRODUCT_CREATE", "PRODUCT_UPDATE"}:
+                role = "SELLER"
+            elif intent == "ADMIN":
+                role = "ADMIN"
+            elif intent == "DELIVERY_HUB":
+                role = "HUB_MANAGER"
+            elif intent == "DELIVERY_AGENT":
+                role = "DELIVERY_AGENT"
+            elif intent == "DELIVERY_OPERATION":
+                role = "HUB_MANAGER"
+            else:
+                role = "USER"
             for query in queries:
                 with self.subTest(intent=intent, query=query):
-                    result = classify_intent(query)
+                    result = classify_intent(query, role)
                     self.assertEqual(result["intent"], intent)
                     self.assertIsInstance(result["confidence"], float)
                     self.assertGreaterEqual(result["confidence"], -1.0)
@@ -214,19 +238,86 @@ class SemanticRouterTests(unittest.TestCase):
                     self.assertEqual(result["query"], query)
 
     def test_confusing_intent_boundaries(self) -> None:
+        role_by_intent = {
+            "ADMIN": "ADMIN",
+            "SELLER_PRODUCT": "SELLER",
+            "SELLER_ORDER": "SELLER",
+            "DELIVERY_OPERATION": "DELIVERY_AGENT",
+            "DELIVERY_AGENT": "DELIVERY_AGENT",
+        }
         for query, expected_intent in CONFUSING_CASES:
             with self.subTest(query=query):
-                self.assertEqual(classify_intent(query)["intent"], expected_intent)
+                self.assertEqual(
+                    classify_intent(query, role_by_intent.get(expected_intent, "USER"))["intent"],
+                    expected_intent,
+                )
+
+    def test_role_aware_disambiguation(self) -> None:
+        cases = (
+            ("Show products", "USER", "PRODUCT_SEARCH"),
+            ("Show products", "SELLER", "SELLER_PRODUCT"),
+            ("Show my products", "USER", "PRODUCT_SEARCH"),
+            ("Show my products", "SELLER", "SELLER_PRODUCT"),
+            ("What products do I sell?", "SELLER", "SELLER_PRODUCT"),
+            ("Browse products", "SELLER", "PRODUCT_SEARCH"),
+            ("Show my cart", "USER", "CART"),
+            ("Where is my order?", "USER", "ORDER_STATUS"),
+            ("Cancel my order", "USER", "ORDER_CANCEL"),
+            ("Show my seller orders", "SELLER", "SELLER_ORDER"),
+            ("Show my payouts", "SELLER", "SELLER_PAYOUT"),
+            ("What is your return policy?", "USER", "FAQ"),
+            ("I want to return my damaged product", "USER", "RETURN"),
+            ("Tell me about product 15", "USER", "PRODUCT_DETAIL"),
+            ("Who are you?", "USER", "GENERAL_CHAT"),
+        )
+        for query, role, expected_intent in cases:
+            with self.subTest(query=query, role=role):
+                result = classify_intent(query, role)
+                self.assertEqual(result["intent"], expected_intent)
+                self.assertIsInstance(result["confidence"], float)
+
+    def test_product_manage_intents_route_for_every_role(self) -> None:
+        # Other roles still reach these intents, so the bot can refuse them clearly.
+        cases = (
+            ("add a new product", "USER", "PRODUCT_CREATE"),
+            ("add a new product", "ADMIN", "PRODUCT_CREATE"),
+            ("update product 25", "ADMIN", "PRODUCT_UPDATE"),
+            ("add product 25 to my cart", "USER", "CART"),
+            ("add this shoe to my cart", "SELLER", "CART"),
+            ("update my cart", "USER", "CART"),
+        )
+        for query, role, expected_intent in cases:
+            with self.subTest(query=query, role=role):
+                self.assertEqual(classify_intent(query, role)["intent"], expected_intent)
+
+    def test_role_independent_examples_still_classify_for_user(self) -> None:
+        cases = (
+            ("What is your payment policy?", "FAQ"),
+            ("Can I pay using UPI?", "FAQ"),
+            ("Where is my order?", "ORDER_STATUS"),
+            ("What is the status of order 15?", "ORDER_STATUS"),
+        )
+        for query, expected_intent in cases:
+            with self.subTest(query=query):
+                self.assertEqual(
+                    classify_intent(query, "USER")["intent"], expected_intent
+                )
+
+    def test_role_none_does_not_assume_seller_context(self) -> None:
+        self.assertEqual(classify_intent("show products")["intent"], "PRODUCT_SEARCH")
+        self.assertEqual(
+            classify_intent("show my products")["intent"], "PRODUCT_SEARCH"
+        )
 
     def test_blank_query_is_unknown_without_invented_confidence(self) -> None:
         self.assertEqual(
-            classify_intent("   "),
+            classify_intent("   ", "USER"),
             {"intent": "UNKNOWN", "confidence": None, "query": "   "},
         )
 
     def test_low_confidence_result_falls_back_to_unknown(self) -> None:
         with patch.object(settings, "ROUTER_CONFIDENCE_THRESHOLD", 1.0):
-            result = classify_intent("show me Nike shoes under 5000")
+            result = classify_intent("show me Nike shoes under 5000", "USER")
         self.assertEqual(result["intent"], "UNKNOWN")
         self.assertIsInstance(result["confidence"], float)
         self.assertLess(result["confidence"], 1.0)

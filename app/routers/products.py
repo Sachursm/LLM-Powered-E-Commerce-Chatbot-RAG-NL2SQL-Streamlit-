@@ -1,6 +1,9 @@
+import re
+import string
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from sqlalchemy import select, func
+from sqlalchemy import and_, select, func
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +31,39 @@ router = APIRouter(
     prefix="/products",
     tags=["Products"]
 )
+
+
+def _whole_word_pattern(word: str) -> str:
+    """Case-insensitive whole-word pattern that also accepts singular/plural forms.
+
+    "men" matches "Men" and "Men's" but not "Women" or "Menu";
+    "shoe" and "shoes" match each other.
+    """
+    word = word.casefold()
+    stems = {word}
+    if len(word) > 3 and word.endswith("es"):
+        stems.add(word[:-2])
+    if len(word) > 3 and word.endswith("s"):
+        stems.add(word[:-1])
+    alternatives = "|".join(re.escape(stem) for stem in sorted(stems, key=len, reverse=True))
+    # SQLite evaluates REGEXP with Python's re module, so this uses Python syntax.
+    return rf"(?i)\b(?:{alternatives})(?:s|es)?\b"
+
+
+def product_search_condition(search: str | None):
+    """Every search word must appear as a whole word in the name or description, in any order.
+
+    "men nike" matches "Nike Air Max for Men" but not "Women's Nike Shoes".
+    """
+    words = [word.strip(string.punctuation) for word in search.split()] if search else []
+    words = [word for word in words if word]
+    if not words:
+        return None
+    return and_(*(
+        Product.name.regexp_match(_whole_word_pattern(word)) |
+        Product.description.regexp_match(_whole_word_pattern(word))
+        for word in words
+    ))
 
 
 # =========================================================
@@ -96,17 +132,13 @@ async def get_products(
         # SEARCH FILTER
         # -------------------------------------------------
 
-        if search is not None:
+        search_condition = product_search_condition(search)
 
-            stmt = stmt.where(
-                Product.name.ilike(f"%{search}%") |
-                Product.description.ilike(f"%{search}%")
-            )
+        if search_condition is not None:
 
-            count_stmt = count_stmt.where(
-                Product.name.ilike(f"%{search}%") |
-                Product.description.ilike(f"%{search}%")
-            )
+            stmt = stmt.where(search_condition)
+
+            count_stmt = count_stmt.where(search_condition)
 
         # -------------------------------------------------
         # CATEGORY FILTER

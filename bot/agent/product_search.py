@@ -3,7 +3,7 @@
 import json
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from groq import AsyncGroq
@@ -14,7 +14,11 @@ from langgraph.prebuilt import ToolNode
 from bot.config import settings
 from bot.prompts.product_search import PRODUCT_SEARCH_SYSTEM_PROMPT
 from bot.services.safety import redact_sensitive_text
-from bot.tools.product_search import build_product_search_tools, extract_search_expression
+from bot.tools.product_search import (
+    PRODUCT_PAGE_SIZE,
+    build_product_search_tools,
+    extract_search_expression,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +30,7 @@ class ProductSearchTurn:
     context: dict[str, Any]
     products_returned: int | None
     active_context: dict[str, Any] | None = None
+    products: list[dict[str, Any]] = field(default_factory=list)
 
 
 class ProductSearchState(MessagesState):
@@ -53,8 +58,9 @@ def _system_prompt(state: ProductSearchState) -> str:
         + "Treat the latest user message as an answer to the pending question when applicable. "
         + "For 'any kind', do not invent a type filter; for a specific reply such as 'casual', "
         + "use it as a product search term while preserving existing category and price filters. "
-        + "Keep query terms separate from category: the query is the user's product/brand expression, "
-        + "and category_tool only supplies an independent category filter. Never replace query with category. "
+        + "Keep the workflow's category unless the user asks for a different kind of product; then call "
+        + "category_tool again for the new product. Query holds the full product phrase including earlier terms "
+        + "(e.g. previous 'Nike shoes' + 'men' -> query 'men Nike shoes'); the tool removes the category words. "
         + "For refinements such as 'for men', incorporate the phrase into query because the API has no gender filter. "
         + "For 'what about Adidas?', update the brand/query while retaining compatible category and price filters.\n"
         + "Conversation summary (for meaning only; exact filters in workflow state are authoritative): "
@@ -72,7 +78,8 @@ def _to_groq_messages(messages: list[BaseMessage], system_prompt: str) -> list[d
         elif isinstance(message, ToolMessage):
             converted.append({
                 "role": "tool", "tool_call_id": message.tool_call_id,
-                "content": redact_sensitive_text(str(message.content)),
+                # A page of product JSON is longer than the default chat-text limit.
+                "content": redact_sensitive_text(str(message.content), max_length=8000),
             })
         elif isinstance(message, AIMessage):
             item: dict[str, Any] = {
@@ -199,10 +206,11 @@ def _collect_tool_state(
     *,
     query_seed: str | None = None,
     force_query_seed: bool = False,
-) -> tuple[dict[str, Any], bool, int | None]:
+) -> tuple[dict[str, Any], bool, int | None, list[dict[str, Any]]]:
     result_context = dict(context)
     searched = False
     products_returned: int | None = None
+    products: list[dict[str, Any]] = []
     tool_messages = {m.tool_call_id: m for m in messages if isinstance(m, ToolMessage)}
     for message in messages:
         if not isinstance(message, AIMessage):
@@ -218,6 +226,9 @@ def _collect_tool_state(
             if call["name"] == "category_tool":
                 if payload.get("category"):
                     result_context["category"] = payload["category"]
+                elif "category" in payload:
+                    # No category for the new product: drop the previous search's category.
+                    result_context.pop("category", None)
             elif call["name"] == "product_search_tool":
                 searched = True
                 args = call.get("args") or {}
@@ -231,13 +242,21 @@ def _collect_tool_state(
                         )
                 if force_query_seed and query_seed:
                     result_context["query"] = query_seed
+                if "category" in payload:
+                    # The tool reports the category it actually applied (it may have
+                    # dropped a stale one), which overrides the model's argument.
+                    if payload["category"]:
+                        result_context["category"] = payload["category"]
+                    else:
+                        result_context.pop("category", None)
                 items = payload.get("items")
                 if isinstance(items, list):
                     products_returned = len(items)
+                    products = [item for item in items if isinstance(item, dict)]
                 for key in ("has_more", "total", "skip", "limit"):
                     if key in payload:
                         result_context[key] = payload[key]
-    return result_context, searched, products_returned
+    return result_context, searched, products_returned, products
 
 
 def _waiting_for(answer: str) -> str | None:
@@ -253,6 +272,17 @@ def _waiting_for(answer: str) -> str | None:
     if "price" in lowered or "budget" in lowered:
         return "price_range"
     return "clarification"
+
+
+def _fallback_answer(searched: bool, product_count: int | None, context: dict[str, Any]) -> str:
+    if searched and product_count:
+        return "Here's what I found."
+    if searched:
+        query = context.get("query")
+        return f"No products found for {query}. Would you like to try a different search?" if query else (
+            "No products found. Would you like to try a different search?"
+        )
+    return "What product are you looking for?"
 
 
 def _messages_from_history(history: list[dict[str, str]] | None, query: str) -> list[BaseMessage]:
@@ -271,9 +301,35 @@ def _messages_from_history(history: list[dict[str, str]] | None, query: str) -> 
     return messages
 
 
-def _is_more_request(query: str, history: list[dict[str, str]] | None) -> bool:
+# Words that only ask for further results of the current search, e.g.
+# "is there any other bra" or "do you have more?".
+_MORE_WORDS = {"other", "others", "another", "more", "else"}
+_MORE_FILLER = {
+    "is", "are", "there", "do", "you", "have", "any", "anything", "something", "some",
+    "show", "see", "get", "give", "me", "please", "ones", "one", "options", "option",
+    "results", "products", "items", "available", "got", "the", "a", "an",
+}
+
+
+def _singular(word: str) -> str:
+    return word[:-1] if word.endswith("s") and len(word) > 3 else word
+
+
+def _is_more_request(
+    query: str,
+    history: list[dict[str, str]] | None,
+    product_query: str | None = None,
+) -> bool:
     if re.search(r"\b(show|see|get|give)\s+(me\s+)?more\b|\bmore\s+(options|results)\b", query, re.I):
         return True
+    words = re.findall(r"[a-z]+", query.casefold())
+    if _MORE_WORDS & set(words):
+        # Anything besides filler and the current product words is a refinement:
+        # "any other bra" asks for more, "any other brand" or "other colors" does not.
+        product_words = {_singular(w) for w in re.findall(r"[a-z]+", (product_query or "").casefold())}
+        leftover = [w for w in words if w not in _MORE_WORDS | _MORE_FILLER and _singular(w) not in product_words]
+        if not leftover:
+            return True
     if re.fullmatch(r"\s*(yes|yeah|yep|sure|okay|ok)\s*[.!]?\s*", query, re.I):
         prior = list(history or [])[:-1]
         assistant = next((m.get("content", "") for m in reversed(prior) if m.get("role") == "assistant"), "")
@@ -300,9 +356,22 @@ async def run_product_search_turn(
         # A changed/refined search starts at page one. Explicit more-results
         # replies advance from the backend's retained page state.
         previous_skip = int(context.get("skip") or 0)
+        wants_more = _is_more_request(query, recent_messages, context.get("query"))
+        if wants_more and "has_more" in context and not context["has_more"]:
+            # The last page was already shown; restarting at page one would
+            # repeat products the user has seen. Answer without an LLM call.
+            product = context.get("query")
+            answer = (
+                f"No more products found for {product}. Would you like to try a different search?"
+                if product else "No more products found. Would you like to try a different search?"
+            )
+            logger.info("PRODUCT_SEARCH_NO_MORE_RESULTS=true")
+            if own_client:
+                await client.close()
+            return ProductSearchTurn(answer, None, context, 0, {"intent": "PRODUCT_SEARCH", "context": context})
         context["skip"] = 0
-        if context.get("has_more") and _is_more_request(query, recent_messages):
-            context["skip"] = previous_skip + int(context.get("limit") or 20)
+        if context.get("has_more") and wants_more:
+            context["skip"] = previous_skip + int(context.get("limit") or PRODUCT_PAGE_SIZE)
     try:
         query_seed = context.get("query") or extract_search_expression(query)
         force_query_seed = previous is None or bool(
@@ -327,12 +396,16 @@ async def run_product_search_turn(
         messages = result["messages"]
         final = messages[-1]
         answer = redact_sensitive_text(str(final.content))
-        context, searched, product_count = _collect_tool_state(
+        context, searched, product_count, products = _collect_tool_state(
             messages,
             context,
             query_seed=query_seed,
             force_query_seed=force_query_seed,
         )
+        if not answer.strip():
+            # The model sometimes ends with empty content after a search, since the
+            # cards already show the products; Telegram rejects empty messages.
+            answer = _fallback_answer(searched, product_count, context)
         waiting = _waiting_for(answer) if not searched else None
         if waiting:
             pending = {
@@ -349,7 +422,7 @@ async def run_product_search_turn(
         logger.info("Products returned: %s", product_count if product_count is not None else "not searched")
         logger.info("Pending workflow after response: %s", pending.get("waiting_for") if pending else "none")
         logger.info("ACTIVE_CONTEXT=%s", redact_sensitive_text(json.dumps(context, ensure_ascii=False)))
-        return ProductSearchTurn(answer, pending, context, product_count, active)
+        return ProductSearchTurn(answer, pending, context, product_count, active, products)
     finally:
         if own_client:
             await client.close()

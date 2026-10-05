@@ -4,6 +4,7 @@ These names describe what a user appears to want. They intentionally do not
 contain API endpoint names, tool names, business logic, or authorization rules.
 """
 
+import re
 from types import MappingProxyType
 
 
@@ -23,6 +24,17 @@ ROUTE_UTTERANCES = MappingProxyType(
             "show discounted wireless headphones",
             "show products",
             "browse all products in the marketplace",
+            "find something",
+            "what products are available",
+            "show me shoes",
+            "do you have electronics",
+            "find something under 5000",
+            "search for a keyboard",
+            "do you have a keyboard",
+            "show laptops",
+            "find a Bluetooth mouse",
+            "what products do I have",
+            "what are the products you have",
         ),
         "PRODUCT_DETAIL": (
             "tell me about product 25",
@@ -73,6 +85,7 @@ ROUTE_UTTERANCES = MappingProxyType(
             "submit the items in my cart as a new order",
             "I am ready to buy these items now",
             "please submit this purchase",
+            "start a new purchase with these items",
         ),
         "ORDER_STATUS": (
             "where is my order",
@@ -87,6 +100,7 @@ ROUTE_UTTERANCES = MappingProxyType(
             "check where order number 15 is in delivery",
             "show my recent purchases",
             "has my order been dispatched yet",
+            "check the delivery status for order number 15",
         ),
         "ORDER_CANCEL": (
             "cancel my order",
@@ -176,14 +190,39 @@ ROUTE_UTTERANCES = MappingProxyType(
         "SELLER_PRODUCT": (
             "show my products",
             "show my seller products",
+            "remove a product from my seller catalog",
+            "delete my product listing",
+            "show products that I sell",
+            "what products do I sell",
+            "list all the items in my shop",
+        ),
+        "PRODUCT_CREATE": (
+            "add a new product",
+            "create a new product",
             "create a new product listing for my shop",
             "add a product to my seller catalog",
+            "I want to sell a new item",
+            "list a new item for sale",
+            "add a new item to the store",
+            "upload a new product to the catalog",
+            "put a new product up for sale",
+            "add new shoes to the catalog",
+            "add a new laptop to my shop catalog",
+            "create a product called Puma Runner priced 2999",
+            "create product Samsung earbuds with price 1999 and stock 10",
+        ),
+        "PRODUCT_UPDATE": (
+            "update a product",
+            "edit a product",
             "update the price of my listed product",
             "change stock for one of my products",
-            "remove a product from my seller catalog",
-            "show products that I sell",
             "edit my shop's product listing",
             "adjust the inventory quantity on my product page",
+            "update product 25",
+            "change the description of product 12",
+            "change the category of my product",
+            "change the image of my product",
+            "set the price of product 40 to 2999",
         ),
         "SELLER_ORDER": (
             "show orders for products I sell",
@@ -234,6 +273,7 @@ ROUTE_UTTERANCES = MappingProxyType(
             "change the information for distribution location 4",
             "edit the configuration for hub number 4",
             "update the parcel depot details",
+            "edit the details of delivery center 4",
         ),
         "DELIVERY_AGENT": (
             "show the delivery agents",
@@ -307,7 +347,9 @@ ROUTE_DESCRIPTIONS = MappingProxyType(
         "REVIEW": "Create, view, edit, or delete a product review.",
         "FAQ": "Ask about general store policies or service information.",
         "ACCOUNT": "View or manage the authenticated user's account.",
-        "SELLER_PRODUCT": "Manage product listings owned by the seller.",
+        "SELLER_PRODUCT": "View or remove product listings owned by the seller.",
+        "PRODUCT_CREATE": "Create a new product listing in the catalog.",
+        "PRODUCT_UPDATE": "Change the details of an existing product listing.",
         "SELLER_ORDER": "View or handle orders associated with the seller's products.",
         "SELLER_PAYOUT": "Ask about seller payouts, bank details, or commission.",
         "ADMIN": "Ask for administrative platform management information or actions.",
@@ -318,3 +360,59 @@ ROUTE_DESCRIPTIONS = MappingProxyType(
         "IMAGE": "Text indicates an attached image needs later OCR or vision handling.",
     }
 )
+
+
+# Only genuinely ambiguous catalog phrases depend on role context. Clear
+# marketplace wording (for example, "browse products") stays PRODUCT_SEARCH.
+# This affects intent classification only; it grants no API permissions.
+ROLE_DISAMBIGUATION = MappingProxyType(
+    {
+        "show products": MappingProxyType(
+            {"default": "PRODUCT_SEARCH", "SELLER": "SELLER_PRODUCT"}
+        ),
+        "show my products": MappingProxyType(
+            {"default": "PRODUCT_SEARCH", "SELLER": "SELLER_PRODUCT"}
+        ),
+        "what products do i have": MappingProxyType(
+            {"default": "PRODUCT_SEARCH", "SELLER": "SELLER_PRODUCT"}
+        ),
+        "browse products": MappingProxyType({"default": "PRODUCT_SEARCH"}),
+    }
+)
+
+
+# Product create/update commands carry brand, price and category words that pull
+# the embedding match toward search or category, so a clear command shape is
+# matched first. Messages about carts, orders, reviews or accounts never match.
+_NOT_A_LISTING_CHANGE = re.compile(
+    r"\b(?:cart|basket|wishlist|orders?|reviews?|ratings?|feedback|address|profile|password|account)\b",
+    re.IGNORECASE,
+)
+COMMAND_PATTERNS = (
+    (
+        "PRODUCT_CREATE",
+        re.compile(
+            r"^(?:please\s+)?(?:i\s+(?:want|would like)\s+to\s+)?"
+            r"(?:(?:create|add|upload)\s+(?:a\s+|an\s+)?(?:new\s+)?|list\s+(?:a\s+)?new\s+)"
+            r"(?:products?|items?|listings?)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "PRODUCT_UPDATE",
+        re.compile(
+            r"^(?:please\s+)?(?:update|edit|change|modify|set|raise|lower|increase|decrease)\b"
+            r"(?=.*\b(?:products?|listings?)\b)"
+            r"(?=.*\b(?:price|stock|inventory|description|category|image|photo|name|title|details)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+def match_command_intent(text: str) -> str | None:
+    """Return the intent for a clear product create/update command, if any."""
+    if _NOT_A_LISTING_CHANGE.search(text):
+        return None
+    stripped = text.strip()
+    return next((intent for intent, pattern in COMMAND_PATTERNS if pattern.search(stripped)), None)

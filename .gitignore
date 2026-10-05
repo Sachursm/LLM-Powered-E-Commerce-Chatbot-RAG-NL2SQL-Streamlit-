@@ -4,9 +4,15 @@ web_venv/
 __pycache__/
 test.py
 tests/
+!tests/
+tests/*
+!tests/test_product_search.py
+!tests/test_product_manage.py
 test_cases/
 database_learning/
 db.sqlite
 data/
 RATE_LIMITING_STUDY.md
 FASTAPI_LEARNING_GUIDE_LOCAL.md
+/project.md
+/check_images
