@@ -20,6 +20,8 @@ POSITIVE_CASES = {
         "browse discounted Bluetooth headphones",
         "what black formal shoes are available for under 3000",
         "search the catalog for Puma sports shoes",
+        "find the items that belong to electronics",
+        "browse everything in the home appliances section",
     ),
     "PRODUCT_DETAIL": (
         "what is the listed price for product number 25",
@@ -31,9 +33,30 @@ POSITIVE_CASES = {
     "CATEGORY": (
         "list every category in the shop",
         "which product sections can I browse",
-        "find the items that belong to electronics",
-        "what kinds of products are under footwear",
-        "browse everything in the home appliances section",
+        "is there a category for watches",
+        "show me the categories similar to jewellery",
+        "what categories does the store have",
+    ),
+    "CATEGORY_CREATE": (
+        "create a category named smart home",
+        "add a new category for kitchen tools",
+        "I want to create a new product category",
+        "make a category called gift cards",
+        "please add a category for toys",
+    ),
+    "CATEGORY_UPDATE": (
+        "rename the bags category to luggage",
+        "change the name of the electronics category",
+        "edit the category name for shoes",
+        "rename category watches to timepieces",
+        "update the name of a category",
+    ),
+    "CATEGORY_DELETE": (
+        "delete the toys category",
+        "remove category gift cards",
+        "delete an empty category",
+        "please remove the luggage category",
+        "remove a category we no longer use",
     ),
     "CART": (
         "let me see the items in my basket",
@@ -110,9 +133,9 @@ POSITIVE_CASES = {
     "SELLER_PRODUCT": (
         "show my products",
         "list the products in my seller inventory",
-        "delete a product from my seller catalog",
         "which items am I selling in my shop",
-        "remove one of my listings",
+        "list the items I am selling",
+        "show everything I have listed for sale",
     ),
     "PRODUCT_CREATE": (
         "create a listing for a new item in my shop",
@@ -120,6 +143,13 @@ POSITIVE_CASES = {
         "add a new pair of shoes to the catalog",
         "put a new item up for sale",
         "create product Nike Air Zoom priced 4999",
+    ),
+    "PRODUCT_DELETE": (
+        "delete a product from my seller catalog",
+        "remove one of my listings",
+        "delete product 25",
+        "take down the Puma Runner listing",
+        "please remove item 40 from the store",
     ),
     "PRODUCT_UPDATE": (
         "raise the price of one of my listed products",
@@ -200,7 +230,7 @@ CONFUSING_CASES = (
         ("show products", "PRODUCT_SEARCH"),
         ("tell me about product 25", "PRODUCT_DETAIL"),
         ("show my products that I sell", "SELLER_PRODUCT"),
-        ("show products in the shoes category", "CATEGORY"),
+        ("show products in the shoes category", "PRODUCT_SEARCH"),
         ("show my orders", "ORDER_STATUS"),
         ("show orders for products in my shop", "SELLER_ORDER"),
         ("show all orders across the platform", "ADMIN"),
@@ -216,7 +246,10 @@ class SemanticRouterTests(unittest.TestCase):
         self.assertEqual(set(ROUTE_UTTERANCES), set(POSITIVE_CASES))
         for intent, queries in POSITIVE_CASES.items():
             self.assertGreaterEqual(len(queries), 5)
-            if intent.startswith("SELLER_") or intent in {"PRODUCT_CREATE", "PRODUCT_UPDATE"}:
+            if intent.startswith("SELLER_") or intent in {
+                "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE",
+                "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE",
+            }:
                 role = "SELLER"
             elif intent == "ADMIN":
                 role = "ADMIN"
@@ -285,10 +318,29 @@ class SemanticRouterTests(unittest.TestCase):
             ("add product 25 to my cart", "USER", "CART"),
             ("add this shoe to my cart", "SELLER", "CART"),
             ("update my cart", "USER", "CART"),
+            ("delete product 45", "SELLER", "PRODUCT_DELETE"),
+            ("delete product 45", "USER", "PRODUCT_DELETE"),
+            ("remove this item from my cart", "SELLER", "CART"),
         )
         for query, role, expected_intent in cases:
             with self.subTest(query=query, role=role):
                 self.assertEqual(classify_intent(query, role)["intent"], expected_intent)
+
+    def test_delete_commands_pick_the_right_target(self) -> None:
+        # The same verbs delete a product, a category, a cart item or a review.
+        cases = (
+            ("remove test1 from categories", "CATEGORY_DELETE"),
+            ("delete the department named Toys", "CATEGORY_DELETE"),
+            ("remove test1 category", "CATEGORY_DELETE"),
+            ("delete product 45", "PRODUCT_DELETE"),
+            ("remove item 102 from my catalog", "PRODUCT_DELETE"),
+            ("permanently remove product 64", "PRODUCT_DELETE"),
+            ("remove product 10 from my cart", "CART"),
+            ("delete my product review", "REVIEW"),
+        )
+        for query, expected_intent in cases:
+            with self.subTest(query=query):
+                self.assertEqual(classify_intent(query, "ADMIN")["intent"], expected_intent)
 
     def test_role_independent_examples_still_classify_for_user(self) -> None:
         cases = (

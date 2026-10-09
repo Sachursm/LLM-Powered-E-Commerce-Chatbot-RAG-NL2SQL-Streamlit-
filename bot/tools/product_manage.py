@@ -1,4 +1,4 @@
-"""Create/update product tools backed by the existing FastAPI product endpoints.
+"""Create/update/delete product tools backed by the existing FastAPI product endpoints.
 
 The LLM only fills a draft through these tools. Nothing is written to the API
 until the user taps Confirm; ``submit_product_change`` performs that write with
@@ -15,15 +15,15 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.schemas.category import CategoryResponse
 from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
-from bot.services.api_client import api_get, api_patch, api_post
+from bot.services.api_client import api_delete, api_get, api_patch, api_post
 from bot.services.category_match import closest_categories, find_exact
 from bot.services.safety import redact_sensitive_text
 from bot.tools.product_search import _get_categories
 
 logger = logging.getLogger(__name__)
 
-# Admins write through /products/, sellers through /seller/products/; both
-# endpoints take the same ProductCreate / ProductUpdate bodies.
+# Admins write through /products/, sellers through /seller/products/ (their
+# own products only); both take the same ProductCreate / ProductUpdate bodies.
 PRODUCT_ENDPOINTS = {"ADMIN": "/products/", "SELLER": "/seller/products/"}
 
 REQUIRED_CREATE_FIELDS = ("name", "description", "price", "stock", "category", "image_url")
@@ -62,6 +62,17 @@ class UpdateProductInput(ProductFieldsInput):
     product_id: int | None = Field(default=None, description="Product ID, if the user gave one")
     product_name: str | None = Field(
         default=None, description="Name of the product to change, if the user gave a name and no ID"
+    )
+
+
+class DeleteProductInput(BaseModel):
+    """Product the user wants to delete."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    product_id: int | None = Field(default=None, description="Product ID, if the user gave one")
+    product_name: str | None = Field(
+        default=None, description="Name of the product to delete, if the user gave a name and no ID"
     )
 
 
@@ -273,6 +284,33 @@ def build_product_manage_tools(
             state.update(status="error", error="Categories are temporarily unavailable. Please try again.")
         return json.dumps({key: state.get(key) for key in ("status", "missing", "problems")})
 
+    async def select_product(product_id: int | None, product_name: str | None) -> bool:
+        """Look up the product the user named; return False when the reply is about the lookup."""
+        if product_id is None and product_name and not state.get("product_id"):
+            name = redact_sensitive_text(product_name, max_length=200)
+            matches = await _search_products(access_token, role, name)
+            if len(matches) != 1:
+                state.update(
+                    status="choose_product",
+                    product_name=name,
+                    matches=[{"id": m.id, "name": m.name, "price": m.price} for m in matches],
+                )
+                return False
+            product_id = matches[0].id
+        if product_id is not None and product_id != state.get("product_id"):
+            product = await _find_product(access_token, role, product_id)
+            if product is None:
+                state.update(status="product_not_found", requested_id=product_id)
+                return False
+            categories = await _get_categories(access_token)
+            state.update(product_id=product.id, current=_current_values(product, categories))
+        return True
+
+    def lookup_failed(exc: Exception) -> None:
+        logger.warning("Product lookup failed (%s)", type(exc).__name__)
+        message = str(exc) if isinstance(exc, RuntimeError) else ""
+        state.update(status="error", error=message or "Product lookup is temporarily unavailable. Please try again.")
+
     @tool("update_product_tool", args_schema=UpdateProductInput)
     async def update_product_tool(
         product_id: int | None = None,
@@ -287,24 +325,8 @@ def build_product_manage_tools(
         try:
             if not await merge_fields(fields):
                 return json.dumps({"status": state["status"]})
-            if product_id is None and product_name and not state.get("product_id"):
-                matches = await _search_products(access_token, role, redact_sensitive_text(product_name, max_length=200))
-                if len(matches) == 1:
-                    product_id = matches[0].id
-                else:
-                    state.update(
-                        status="choose_product",
-                        product_name=redact_sensitive_text(product_name, max_length=200),
-                        matches=[{"id": m.id, "name": m.name, "price": m.price} for m in matches],
-                    )
-                    return json.dumps({"status": state["status"], "matches": len(matches)})
-            if product_id is not None and product_id != state.get("product_id"):
-                product = await _find_product(access_token, role, product_id)
-                if product is None:
-                    state.update(status="product_not_found", requested_id=product_id)
-                    return json.dumps({"status": state["status"]})
-                categories = await _get_categories(access_token)
-                state.update(product_id=product.id, current=_current_values(product, categories))
+            if not await select_product(product_id, product_name):
+                return json.dumps({"status": state["status"], "matches": len(state.get("matches") or [])})
             if not state.get("product_id"):
                 state["status"] = "need_product"
             elif not draft:
@@ -312,12 +334,21 @@ def build_product_manage_tools(
             else:
                 state["status"] = "ready"
         except (RuntimeError, ValueError, TypeError) as exc:
-            logger.warning("Product update lookup failed (%s)", type(exc).__name__)
-            message = str(exc) if isinstance(exc, RuntimeError) else ""
-            state.update(status="error", error=message or "Product lookup is temporarily unavailable. Please try again.")
+            lookup_failed(exc)
         return json.dumps({"status": state["status"]})
 
-    return [create_product_tool, update_product_tool]
+    @tool("delete_product_tool", args_schema=DeleteProductInput)
+    async def delete_product_tool(product_id: int | None = None, product_name: str | None = None) -> str:
+        """Choose the product the user wants to delete."""
+        logger.info("Tool called: delete_product_tool product_id=%s by_name=%s", product_id, bool(product_name))
+        try:
+            if await select_product(product_id, product_name):
+                state["status"] = "ready" if state.get("product_id") else "need_product"
+        except (RuntimeError, ValueError, TypeError) as exc:
+            lookup_failed(exc)
+        return json.dumps({"status": state["status"]})
+
+    return [create_product_tool, update_product_tool, delete_product_tool]
 
 
 def describe_update_changes(draft: dict[str, Any], current: dict[str, Any]) -> list[str]:
@@ -356,6 +387,15 @@ def confirmation_summary(intent: str, pending: dict[str, Any]) -> str:
             "Tap Confirm to create it, or Cancel.",
         ])
     current = pending.get("current") or {}
+    if intent == "PRODUCT_DELETE":
+        return "\n".join([
+            f"Delete product #{pending.get('product_id')} ({current.get('name')})?",
+            f"Price: {_format_price(current.get('price'))}, stock: {current.get('stock')}, "
+            f"category: {current.get('category') or 'unknown'}.",
+            "This can't be undone.",
+            "",
+            "Tap Confirm to delete it, or Cancel.",
+        ])
     return "\n".join([
         f"Please confirm the changes to product #{pending.get('product_id')} ({current.get('name')}):",
         *describe_update_changes(draft, current),
@@ -385,6 +425,10 @@ async def submit_product_change(
             endpoint = f"{base.rstrip('/')}/{int(pending['product_id'])}"
             logger.info("PRODUCT_UPDATE_SUBMIT endpoint=%s fields=%s", endpoint, sorted(payload))
             result = await api_patch(endpoint, data=payload, token=access_token)
+        elif intent == "PRODUCT_DELETE" and pending.get("product_id"):
+            endpoint = f"{base.rstrip('/')}/{int(pending['product_id'])}"
+            logger.info("PRODUCT_DELETE_SUBMIT endpoint=%s", endpoint)
+            result = await api_delete(endpoint, token=access_token)
         else:
             return "That product change is no longer active. Please start again.", None
     except ValidationError:
@@ -392,6 +436,9 @@ async def submit_product_change(
 
     status = int(result.get("status") or 503)
     detail = _detail(result)
+    if status == 204 and intent == "PRODUCT_DELETE":
+        name = (pending.get("current") or {}).get("name") or "the product"
+        return f"✅ Deleted product #{pending.get('product_id')}: {name}.", None
     if status in (200, 201):
         data = result.get("data") or {}
         name = data.get("name") or draft.get("name") or "the product"

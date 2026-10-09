@@ -159,7 +159,8 @@ def remove_category_terms(query: str | None, category: str | None) -> str | None
     return " ".join(kept) or None
 
 
-def _category_match(phrase: str, categories: list[CategoryResponse]) -> CategoryResponse | None:
+def _category_matches(phrase: str, categories: list[CategoryResponse]) -> list[CategoryResponse]:
+    """The best-matching categories; several when they match equally well."""
     phrase_words = _singularized(_tokens(phrase))
     matches: list[tuple[float, int, CategoryResponse]] = []
     for category in categories:
@@ -170,7 +171,10 @@ def _category_match(phrase: str, categories: list[CategoryResponse]) -> Category
         score = len(overlap) / len(name_tokens) if name_tokens else 0.0
         if score >= 0.5:
             matches.append((score, len(overlap), category))
-    return max(matches, key=lambda item: (item[0], item[1]))[2] if matches else None
+    if not matches:
+        return []
+    best = max((score, overlap) for score, overlap, _ in matches)
+    return [category for score, overlap, category in matches if (score, overlap) == best]
 
 
 async def _get_categories(token: str) -> list[CategoryResponse]:
@@ -233,6 +237,17 @@ def build_product_search_tools(
     # None means the lookup ran and found no category for the new product.
     matched: dict[str, str | None] = {}
 
+    async def _real_category(name: str) -> str | None:
+        """The API's spelling of a category, or None for a name the model made up ("Shoes")."""
+        try:
+            categories = await _get_categories(access_token)
+        except (RuntimeError, ValueError, TypeError):
+            return name
+        real = next((c.name for c in categories if c.name.casefold() == name.casefold()), None)
+        if real is None:
+            logger.info("PRODUCT_SEARCH_UNKNOWN_CATEGORY=%s; searching without a category", redact_sensitive_text(name, max_length=100))
+        return real
+
     @tool("category_tool", args_schema=CategoryLookupInput)
     async def category_tool(product_phrase: str) -> str:
         """Match a product phrase to an exact category returned by the marketplace API."""
@@ -243,7 +258,17 @@ def build_product_search_tools(
         except (RuntimeError, ValueError, TypeError):
             logger.warning("Category lookup failed while validating API response")
             return json.dumps({"error": "Categories are temporarily unavailable."})
-        match = _category_match(product_phrase, categories)
+        best = _category_matches(product_phrase, categories)
+        if len(best) > 1:
+            # Picking one would hide the others' products; search them all by text.
+            matched["category"] = None
+            matched["several"] = [c.name for c in best]
+            logger.info("CATEGORY_TOOL_SEVERAL_MATCHES=%s", matched["several"])
+            return json.dumps({
+                "category": None,
+                "note": "Several categories match equally; search with category=null so all of them are included.",
+            })
+        match = best[0] if best else None
         if match is None:
             matched["category"] = None
             return json.dumps({"category": None, "available_categories": [c.name for c in categories]})
@@ -278,6 +303,13 @@ def build_product_search_tools(
                 category = matched["category"]
         elif category is None:
             category = previous_category
+        if category is not None and category in (matched.get("several") or []):
+            # The model picked one of several equal matches; keep all of them.
+            category = None
+        if category is not None and category not in (matched.get("category"), previous_category):
+            # Only a name the model wrote itself needs checking; this turn's
+            # category_tool match and the earlier search's category are real.
+            category = await _real_category(category)
         # Only a category carried over from an earlier turn may be stale.
         inherited_category = category is not None and category == previous_category and "category" not in matched
         full_query = query

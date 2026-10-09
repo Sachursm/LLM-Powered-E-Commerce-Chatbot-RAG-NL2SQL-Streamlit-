@@ -317,6 +317,39 @@ class ConversationRoutingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("Conversation summary:", detector_prompt)
         self.assertNotIn("Active context:", detector_prompt)
 
+    async def test_detector_is_told_the_current_task(self):
+        from bot.agent.intent_fallback import detect_continuation
+
+        fake = FakeFallbackClient("NO")
+        await detect_continuation(
+            "delete category test1", "show me shoes", "Here are some shoes.",
+            current_task="PRODUCT_SEARCH", groq_client=fake,
+        )
+        detector_prompt = fake.requests[0]["messages"][1]["content"]
+        self.assertIn("The current action is: search or browse products", detector_prompt)
+        # Every action is listed, with look-alike commands for other actions.
+        self.assertIn("- delete a product category", detector_prompt)
+        self.assertIn("- delete a product listing", detector_prompt)
+        self.assertIn("'remove test1 from categories' (delete a category)", detector_prompt)
+        self.assertIn("'remove Nike' (drops a filter)", detector_prompt)
+
+    async def test_command_for_another_task_goes_to_the_router(self):
+        active = {"intent": "PRODUCT_SEARCH", "context": {"query": "shoes"}}
+        fake = FakeFallbackClient("NO")
+        with patch(
+            "bot.agent.conversation.classify_intent",
+            return_value={"intent": "CATEGORY_DELETE", "confidence": 1.0, "query": "delete category test1"},
+        ) as router:
+            decision = await resolve_message_intent(
+                "delete category test1", "ADMIN", active_context=active,
+                previous_user_message="show me shoes", previous_bot_message="Here are some shoes.",
+                groq_client=fake,
+            )
+        router.assert_called_once()
+        self.assertEqual(decision["intent"], "CATEGORY_DELETE")
+        self.assertFalse(decision["continuation"])
+        self.assertIn("The current action is: search or browse products", fake.requests[0]["messages"][1]["content"])
+
     async def test_gaming_continues_pending_keyboard_clarification(self):
         pending = {
             "intent": "PRODUCT_SEARCH", "waiting_for": "product_type",

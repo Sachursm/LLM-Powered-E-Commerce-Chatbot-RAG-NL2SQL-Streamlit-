@@ -27,7 +27,23 @@ from bot.handlers.commands import (
 )
 from bot.agent.conversation import resolve_message_intent
 from bot.agent.product_manage import PRODUCT_MANAGE_INTENTS
-from bot.handlers.product_cards import send_product_cards
+from bot.handlers.cart import (
+    CALLBACK_PATTERN as CART_CALLBACK_PATTERN,
+    cart_confirm_keyboard,
+    handle_cart_callback,
+)
+from bot.handlers.categories import (
+    CALLBACK_PATTERN as CATEGORY_CALLBACK_PATTERN,
+    category_keyboard,
+    handle_category_callback,
+)
+from bot.handlers.product_cards import send_cart_cards, send_product_cards, send_product_detail
+from bot.handlers.product_detail import (
+    CALLBACK_PATTERN as PRODUCT_DETAIL_CALLBACK_PATTERN,
+    ProductDetailTurn,
+    handle_product_detail_callback,
+    run_product_detail_turn,
+)
 from bot.handlers.product_manage import (
     CALLBACK_PATTERN as PRODUCT_MANAGE_CALLBACK_PATTERN,
     confirm_keyboard,
@@ -37,9 +53,12 @@ from bot.handlers.product_manage import (
 from bot.handlers.typing import typing_indicator
 from bot.middleware.auth_check import user_is_authenticated
 from bot.router.semantic import role_may_run
+from bot.tools.category_manage import CATEGORY_MANAGE_INTENTS
+from bot.tools.product_detail import first_position, remember_shown, shown_entries, shown_ids
 from bot.services.session import (
     append_recent_message,
     get_session,
+    remember_last_viewed,
     save_conversation_memory,
 )
 
@@ -135,8 +154,13 @@ async def _handle_user_text(
         reply_markup = None
         search_succeeded = False
         products: list[dict] = []
-        if decision["intent"] != "PRODUCT_SEARCH":
-            # A newly routed intent replaces an old product-search context.
+        first_card = 1
+        detail_turn = None
+        cart_turn = None
+        if decision["intent"] not in {"PRODUCT_SEARCH", "PRODUCT_DETAIL", "CART"}:
+            # A newly routed intent replaces an old product-search context and
+            # its list of shown products; product details and the cart keep
+            # both, so "add the 2nd one to my cart" works after a search.
             updated_active_context = None
             updated_pending = None
         if decision["intent"] == "PRODUCT_SEARCH":
@@ -168,12 +192,38 @@ async def _handle_user_text(
                     conversation_summary=(
                         stored_conversation.get("summary") if decision["continuation"] else None
                     ),
+                    # A reply to a question ("#2 in the list or ID 2?") still needs the list.
+                    shown_products=(
+                        (active_context or {}).get("shown_products") if continuing_product_search else None
+                    ),
                 )
                 answer = turn.answer
                 updated_pending = turn.pending_workflow
                 updated_active_context = turn.active_context
                 products = turn.products
                 search_succeeded = True
+                if turn.detail:
+                    detail_turn = ProductDetailTurn(
+                        answer, updated_pending, product=turn.detail["product"], category=turn.detail.get("category"),
+                    )
+                previous_shown = (active_context or {}).get("shown_products")
+                if products and updated_active_context:
+                    # Number the cards and keep their IDs and names so the search
+                    # LLM can resolve "the 2nd one"; Show more continues the numbering.
+                    skip = int((updated_active_context.get("context") or {}).get("skip") or 0)
+                    first_card = first_position(skip, previous_shown)
+                    updated_active_context = {
+                        **updated_active_context,
+                        "shown_products": remember_shown(previous_shown, skip, shown_entries(products)),
+                    }
+                elif turn.products_returned is None and continuing_product_search and active_context:
+                    # No new search ran (a product's details, or a question): the
+                    # same search and its list stay, including its page for Show more.
+                    updated_active_context = active_context
+                elif previous_shown and updated_active_context:
+                    # No new cards ("no more products", 0 results): the cards on
+                    # screen are unchanged, so their numbers still point at them.
+                    updated_active_context = {**updated_active_context, "shown_products": previous_shown}
             except Exception as exc:
                 # Avoid logging request headers, credentials, or provider payloads.
                 logger.error("Product search failed (%s)", type(exc).__name__)
@@ -183,7 +233,7 @@ async def _handle_user_text(
         elif decision["intent"] in PRODUCT_MANAGE_INTENTS:
             intent = decision["intent"]
             if not role_may_run(intent, session.get("role")):
-                answer = "You don't have permission to create or update products."
+                answer = "You don't have permission to create, update, or delete products."
             else:
                 try:
                     from bot.agent.product_manage import run_product_manage_turn
@@ -210,6 +260,77 @@ async def _handle_user_text(
                     logger.error("Product %s failed (%s)", intent.lower(), type(exc).__name__)
                     answer = "Product changes are temporarily unavailable. Please try again later."
                     updated_pending = pending
+        elif decision["intent"] == "PRODUCT_DETAIL":
+            try:
+                detail_turn = await run_product_detail_turn(text, session["token"], shown_ids(active_context))
+                answer = detail_turn.answer
+                updated_pending = detail_turn.pending_workflow
+                reply_markup = detail_turn.reply_markup
+            except Exception as exc:
+                logger.error("Product detail failed (%s)", type(exc).__name__)
+                answer = "Product details are temporarily unavailable. Please try again later."
+        elif decision["intent"] == "CATEGORY":
+            try:
+                from bot.agent.category_manage import run_category_view_turn
+
+                turn = await run_category_view_turn(text, session["token"])
+                answer = turn.answer
+                updated_pending = turn.pending_workflow
+                reply_markup = await category_keyboard(session["token"], turn)
+            except Exception as exc:
+                logger.error("Category view failed (%s)", type(exc).__name__)
+                answer = "Categories are temporarily unavailable. Please try again later."
+        elif decision["intent"] in CATEGORY_MANAGE_INTENTS:
+            intent = decision["intent"]
+            if not role_may_run(intent, session.get("role")):
+                answer = "You don't have permission to create, rename, or delete categories."
+            else:
+                try:
+                    from bot.agent.category_manage import run_category_manage_turn
+
+                    continuation_context = decision.get("continuation_context")
+                    turn = await run_category_manage_turn(
+                        text,
+                        session["token"],
+                        intent,
+                        recent_messages=recent_messages,
+                        pending_workflow=(
+                            continuation_context
+                            if decision["continuation"] and continuation_context is pending
+                            else None
+                        ),
+                    )
+                    answer = turn.answer
+                    updated_pending = turn.pending_workflow
+                    reply_markup = await category_keyboard(session["token"], turn)
+                except Exception as exc:
+                    logger.error("Category %s failed (%s)", intent.lower(), type(exc).__name__)
+                    answer = "Category changes are temporarily unavailable. Please try again later."
+                    updated_pending = pending
+        elif decision["intent"] == "CART":
+            try:
+                from bot.agent.cart import run_cart_turn
+
+                continuation_context = decision.get("continuation_context")
+                cart_turn = await run_cart_turn(
+                    text,
+                    session["token"],
+                    recent_messages=recent_messages,
+                    # Only a reply to the cart's question continues it.
+                    pending_workflow=(
+                        continuation_context
+                        if decision["continuation"] and continuation_context is pending
+                        else None
+                    ),
+                    shown_products=(active_context or {}).get("shown_products"),
+                    last_viewed=session.get("last_viewed_product"),
+                )
+                answer = cart_turn.answer
+                updated_pending = cart_turn.pending_workflow
+                reply_markup = cart_confirm_keyboard(updated_pending)
+            except Exception as exc:
+                logger.error("Cart failed (%s)", type(exc).__name__)
+                answer = "The cart is temporarily unavailable. Please try again later."
         elif decision["intent"] == "GENERAL_CHAT":
             answer = "Hi! I can help you search SachuMart products. What are you looking for?"
         elif decision["intent"] == "FAQ":
@@ -232,6 +353,9 @@ async def _handle_user_text(
             ]])
 
         if chat is not None:
+            if detail_turn and detail_turn.product:
+                # "add this to my cart" means the product opened last.
+                await remember_last_viewed(chat.id, detail_turn.product)
             await save_conversation_memory(
                 chat.id,
                 recent_messages=append_recent_message(recent_messages, "assistant", answer),
@@ -240,7 +364,11 @@ async def _handle_user_text(
             )
         if products:
             # Cards first; the assistant's message (and Show more buttons) comes last.
-            await send_product_cards(message, products)
+            await send_product_cards(message, products, start=first_card)
+        if detail_turn and detail_turn.product:
+            await send_product_detail(message, detail_turn.product, detail_turn.category)
+        if cart_turn and cart_turn.items:
+            await send_cart_cards(message, cart_turn.items)
         await message.reply_text(answer, reply_markup=reply_markup)
 
 
@@ -302,6 +430,15 @@ def build_application() -> Application:
     )
     application.add_handler(
         CallbackQueryHandler(handle_product_manage_callback, pattern=PRODUCT_MANAGE_CALLBACK_PATTERN)
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_category_callback, pattern=CATEGORY_CALLBACK_PATTERN)
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_product_detail_callback, pattern=PRODUCT_DETAIL_CALLBACK_PATTERN)
+    )
+    application.add_handler(
+        CallbackQueryHandler(handle_cart_callback, pattern=CART_CALLBACK_PATTERN)
     )
     application.add_handler(
         MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)

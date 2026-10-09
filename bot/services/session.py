@@ -63,6 +63,17 @@ async def get_role(chat_id: int) -> str | None:
     return session.get("role") if session else None
 
 
+async def remember_last_viewed(chat_id: int, product: dict[str, Any]) -> None:
+    """Keep the product whose details were shown last, for "add this to my cart"."""
+    await update_session(
+        chat_id,
+        last_viewed_product={
+            "id": int(product["id"]),
+            "name": redact_sensitive_text(str(product.get("name") or ""), max_length=120),
+        },
+    )
+
+
 def append_recent_message(
     messages: list[dict[str, str]], role: str, content: str
 ) -> list[dict[str, str]]:

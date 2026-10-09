@@ -1,4 +1,4 @@
-"""Telegram handlers for product create/update: Confirm/Cancel buttons and photos."""
+"""Telegram handlers for product drafts: Confirm/Cancel buttons and photos."""
 
 import asyncio
 import logging
@@ -25,11 +25,13 @@ from bot.services.image_upload import (
     upload_product_image,
 )
 from bot.services.session import append_recent_message, get_session, save_conversation_memory
+from bot.tools.category_manage import CATEGORY_MANAGE_INTENTS, submit_category_change
 from bot.tools.product_manage import add_image_url, missing_create_fields, submit_product_change
 
 logger = logging.getLogger(__name__)
 
 CALLBACK_PATTERN = r"^pm:(confirm|cancel):[0-9a-f]+$"
+_PHOTO_INTENTS = frozenset({"PRODUCT_CREATE", "PRODUCT_UPDATE"})
 
 # Albums arrive as several updates at once; serialize each chat's draft edits
 # so one photo's URL is not overwritten by another's session write.
@@ -91,7 +93,8 @@ async def handle_product_manage_callback(update: Update, context: ContextTypes.D
     _, action, confirm_id = callback.data.split(":", 2)
     async with _chat_locks[chat.id]:
         session = await get_session(chat.id) or {}
-        pending = _open_draft(session)
+        # Confirm/Cancel serve both product and category drafts.
+        pending = _open_draft(session, PRODUCT_MANAGE_INTENTS | CATEGORY_MANAGE_INTENTS)
         if (
             not pending
             or pending.get("waiting_for") != "confirmation"
@@ -109,8 +112,11 @@ async def handle_product_manage_callback(update: Update, context: ContextTypes.D
                 message, chat.id, session, "Confirm", "You don't have permission to make that change.", None
             )
             return
+        submit = (
+            submit_category_change if pending["intent"] in CATEGORY_MANAGE_INTENTS else submit_product_change
+        )
         async with typing_indicator(context.bot, chat.id):
-            answer, reopened = await submit_product_change(session["token"], role, pending)
+            answer, reopened = await submit(session["token"], role, pending)
         await _save_and_reply(message, chat.id, session, "Confirm", answer, reopened)
 
 
@@ -156,7 +162,8 @@ async def handle_product_photo(update: Update, context: ContextTypes.DEFAULT_TYP
 
     async with _chat_locks[chat.id]:
         session = await get_session(chat.id) or {}
-        pending = _open_draft(session)
+        # A photo belongs to a create/update draft, never to a delete.
+        pending = _open_draft(session, _PHOTO_INTENTS)
         role = session.get("role")
         if pending is None or not role_may_run(pending["intent"], role):
             if role_may_run("PRODUCT_CREATE", role):

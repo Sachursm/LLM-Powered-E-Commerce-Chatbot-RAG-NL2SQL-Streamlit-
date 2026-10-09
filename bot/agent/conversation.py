@@ -10,7 +10,10 @@ from bot.services.safety import redact_sensitive_text
 logger = logging.getLogger(__name__)
 
 # Workflows that wait for a bare answer such as a price or a category name.
-DRAFT_INTENTS = frozenset({"PRODUCT_CREATE", "PRODUCT_UPDATE"})
+DRAFT_INTENTS = frozenset({
+    "PRODUCT_DETAIL", "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE",
+    "CATEGORY", "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE", "CART",
+})
 
 
 async def resolve_message_intent(
@@ -61,6 +64,7 @@ async def resolve_message_intent(
             text,
             previous_user_message,
             previous_bot_message,
+            current_task=conversation_context.get("intent") if conversation_context else None,
             groq_client=groq_client,
         )
         logger.info("ROUTER_SKIPPED=%s", str(continuation == "YES").lower())

@@ -14,6 +14,7 @@ from langgraph.prebuilt import ToolNode
 from bot.config import settings
 from bot.prompts.product_search import PRODUCT_SEARCH_SYSTEM_PROMPT
 from bot.services.safety import redact_sensitive_text
+from bot.tools.product_detail import build_product_detail_tool
 from bot.tools.product_search import (
     PRODUCT_PAGE_SIZE,
     build_product_search_tools,
@@ -31,6 +32,8 @@ class ProductSearchTurn:
     products_returned: int | None
     active_context: dict[str, Any] | None = None
     products: list[dict[str, Any]] = field(default_factory=list)
+    # {"product", "category"} when the user picked one product to see in full.
+    detail: dict[str, Any] | None = None
 
 
 class ProductSearchState(MessagesState):
@@ -39,6 +42,7 @@ class ProductSearchState(MessagesState):
     workflow_context: dict[str, Any]
     pending_workflow: dict[str, Any] | None
     conversation_summary: str | None
+    shown_products: list[dict[str, Any]]
 
 
 def _system_prompt(state: ProductSearchState) -> str:
@@ -67,7 +71,16 @@ def _system_prompt(state: ProductSearchState) -> str:
         + redact_sensitive_text(state.get("conversation_summary") or "", max_length=500)
         + "\nWorkflow state: "
         + json.dumps(compact, ensure_ascii=False)
+        + _shown_list(state.get("shown_products") or [])
     )
+
+
+def _shown_list(shown: list[dict[str, Any]]) -> str:
+    """The numbered cards the user can see, so "the 2nd one" maps to a Product ID."""
+    if not shown:
+        return ""
+    lines = [f"{n}. Product ID {entry['id']}: {entry.get('name') or ''}" for n, entry in enumerate(shown, start=1)]
+    return "\nProducts shown to the user (list number. Product ID: name):\n" + "\n".join(lines)
 
 
 def _to_groq_messages(messages: list[BaseMessage], system_prompt: str) -> list[dict[str, Any]]:
@@ -168,7 +181,13 @@ def _initial_context(
         context["query"] = redact_sensitive_text(expression, max_length=200) if expression else None
     elif pending and pending.get("waiting_for") in {"product_type", "category"}:
         reply = extract_search_expression(query)
-        if reply and reply.casefold() not in {"any kind", "any type", "anything", "whatever"}:
+        # An answer to "What kind?" is a few words ("casual", "gaming"). A whole
+        # sentence is not appended, or the query collects unrelated requests.
+        if (
+            reply
+            and len(reply.split()) <= 4
+            and reply.casefold() not in {"any kind", "any type", "anything", "whatever"}
+        ):
             previous_query = str(context.get("query") or "").strip()
             category = str(context.get("category") or "").replace("-", " ").strip()
             if previous_query and reply.casefold() in previous_query.casefold():
@@ -320,7 +339,12 @@ def _is_more_request(
     history: list[dict[str, str]] | None,
     product_query: str | None = None,
 ) -> bool:
-    if re.search(r"\b(show|see|get|give)\s+(me\s+)?more\b|\bmore\s+(options|results)\b", query, re.I):
+    # "show me more about the 8th one" asks for one product's details, not the next page.
+    if re.search(
+        r"\b(show|see|get|give)\s+(me\s+)?more\b(?!\s+(?:about|of|on|details?|info|information)\b)"
+        r"|\bmore\s+(options|results)\b",
+        query, re.I,
+    ):
         return True
     words = re.findall(r"[a-z]+", query.casefold())
     if _MORE_WORDS & set(words):
@@ -345,9 +369,14 @@ async def run_product_search_turn(
     pending_workflow: dict[str, Any] | None = None,
     active_context: dict[str, Any] | None = None,
     conversation_summary: str | None = None,
+    shown_products: list[dict[str, Any]] | None = None,
     groq_client: Any | None = None,
 ) -> ProductSearchTurn:
-    """Run one graph turn, keeping credentials outside all graph/model state."""
+    """Run one graph turn, keeping credentials outside all graph/model state.
+
+    ``shown_products`` is the numbered list on the user's cards, so the model can
+    open "the 2nd one" with product_detail_tool.
+    """
     own_client = groq_client is None
     client = groq_client or AsyncGroq(api_key=settings.GROQ_API_KEY)
     previous = pending_workflow or active_context
@@ -383,6 +412,8 @@ async def run_product_search_turn(
             force_query_seed=force_query_seed,
             default_filters=context if previous is not None else None,
         )
+        detail: dict[str, Any] = {}
+        tools.append(build_product_detail_tool(access_token, detail))
         graph = _build_graph(tools, client)
         result = await graph.ainvoke(
             {
@@ -390,6 +421,7 @@ async def run_product_search_turn(
                 "workflow_context": context,
                 "pending_workflow": pending_workflow,
                 "conversation_summary": conversation_summary,
+                "shown_products": shown_products or [],
             },
             config={"recursion_limit": 12},
         )
@@ -405,8 +437,9 @@ async def run_product_search_turn(
         if not answer.strip():
             # The model sometimes ends with empty content after a search, since the
             # cards already show the products; Telegram rejects empty messages.
-            answer = _fallback_answer(searched, product_count, context)
-        waiting = _waiting_for(answer) if not searched else None
+            answer = "Here are the full details." if detail else _fallback_answer(searched, product_count, context)
+        # A product's details answer the user; a closing question there is not a clarification.
+        waiting = _waiting_for(answer) if not searched and not detail else None
         if waiting:
             pending = {
                 "intent": "PRODUCT_SEARCH",
@@ -422,7 +455,7 @@ async def run_product_search_turn(
         logger.info("Products returned: %s", product_count if product_count is not None else "not searched")
         logger.info("Pending workflow after response: %s", pending.get("waiting_for") if pending else "none")
         logger.info("ACTIVE_CONTEXT=%s", redact_sensitive_text(json.dumps(context, ensure_ascii=False)))
-        return ProductSearchTurn(answer, pending, context, product_count, active, products)
+        return ProductSearchTurn(answer, pending, context, product_count, active, products, detail or None)
     finally:
         if own_client:
             await client.close()

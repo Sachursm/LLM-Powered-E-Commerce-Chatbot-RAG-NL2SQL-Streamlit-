@@ -44,9 +44,13 @@ COMMON_INTENTS = frozenset(
 ROLE_INTENTS = {
     "USER": frozenset(),
     "SELLER": frozenset({
-        "SELLER_PRODUCT", "SELLER_ORDER", "SELLER_PAYOUT", "PRODUCT_CREATE", "PRODUCT_UPDATE",
+        "SELLER_PRODUCT", "SELLER_ORDER", "SELLER_PAYOUT", "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE",
+        "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE",
     }),
-    "ADMIN": frozenset({"ADMIN", "PRODUCT_CREATE", "PRODUCT_UPDATE"}),
+    "ADMIN": frozenset({
+        "ADMIN", "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE",
+        "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE",
+    }),
     "HUB_MANAGER": frozenset({"DELIVERY_HUB", "DELIVERY_OPERATION"}),
     "DELIVERY_AGENT": frozenset({"DELIVERY_AGENT", "DELIVERY_OPERATION"}),
 }
@@ -54,7 +58,9 @@ ROLE_INTENTS = {
 
 # Routed for every role so other roles get a clear "no permission" reply
 # instead of a misroute; only the roles in ROLE_INTENTS may run them.
-GATED_INTENTS = frozenset({"PRODUCT_CREATE", "PRODUCT_UPDATE"})
+GATED_INTENTS = frozenset({
+    "PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE", "CATEGORY_CREATE", "CATEGORY_UPDATE", "CATEGORY_DELETE",
+})
 
 
 def allowed_intents_for_role(role: str | None) -> tuple[str, ...]:

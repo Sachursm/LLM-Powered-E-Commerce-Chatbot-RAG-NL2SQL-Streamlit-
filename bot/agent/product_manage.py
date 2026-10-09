@@ -1,4 +1,4 @@
-"""LangGraph workflow that fills a product create/update draft for confirmation."""
+"""LangGraph workflow that fills a product create/update/delete draft for confirmation."""
 
 import json
 import logging
@@ -14,7 +14,11 @@ from langgraph.prebuilt import ToolNode
 
 from bot.agent.product_search import _messages_from_history, _to_groq_messages, _tool_definitions
 from bot.config import settings
-from bot.prompts.product_manage import PRODUCT_CREATE_SYSTEM_PROMPT, PRODUCT_UPDATE_SYSTEM_PROMPT
+from bot.prompts.product_manage import (
+    PRODUCT_CREATE_SYSTEM_PROMPT,
+    PRODUCT_DELETE_SYSTEM_PROMPT,
+    PRODUCT_UPDATE_SYSTEM_PROMPT,
+)
 from bot.services.safety import redact_sensitive_text
 from bot.tools.product_manage import (
     FIELD_LABELS,
@@ -27,7 +31,17 @@ from bot.tools.product_manage import (
 
 logger = logging.getLogger(__name__)
 
-PRODUCT_MANAGE_INTENTS = frozenset({"PRODUCT_CREATE", "PRODUCT_UPDATE"})
+PRODUCT_MANAGE_INTENTS = frozenset({"PRODUCT_CREATE", "PRODUCT_UPDATE", "PRODUCT_DELETE"})
+_PROMPTS = {
+    "PRODUCT_CREATE": PRODUCT_CREATE_SYSTEM_PROMPT,
+    "PRODUCT_UPDATE": PRODUCT_UPDATE_SYSTEM_PROMPT,
+    "PRODUCT_DELETE": PRODUCT_DELETE_SYSTEM_PROMPT,
+}
+_TOOLS = {
+    "PRODUCT_CREATE": "create_product_tool",
+    "PRODUCT_UPDATE": "update_product_tool",
+    "PRODUCT_DELETE": "delete_product_tool",
+}
 _CANCEL = re.compile(r"^\s*(cancel|stop|never ?mind|forget it|abort)\b", re.IGNORECASE)
 
 
@@ -50,12 +64,12 @@ def new_draft(intent: str) -> dict[str, Any]:
 
 
 def _system_prompt(intent: str, pending: dict[str, Any]) -> str:
-    base = PRODUCT_CREATE_SYSTEM_PROMPT if intent == "PRODUCT_CREATE" else PRODUCT_UPDATE_SYSTEM_PROMPT
+    base = _PROMPTS[intent]
     draft = dict(pending.get("draft") or {})
     if draft.get("image_url"):
         draft["image_url"] = f"{len(split_image_urls(draft['image_url']))} image(s) attached"
     compact: dict[str, Any] = {"draft": draft}
-    if intent == "PRODUCT_UPDATE":
+    if intent != "PRODUCT_CREATE":
         compact["product_id"] = pending.get("product_id")
         compact["product_name"] = (pending.get("current") or {}).get("name")
     return base + "\nCurrent draft: " + redact_sensitive_text(json.dumps(compact, ensure_ascii=False), max_length=2000)
@@ -148,7 +162,8 @@ def answer_for_state(intent: str, state: dict[str, Any], pending: dict[str, Any]
             f"Product #{state.get('requested_id')} isn't in your listings. Send another product ID or name."
         ), {**pending, "waiting_for": "product"}
     if status == "need_product":
-        return "Which product do you want to change? Send its ID or name.", {**pending, "waiting_for": "product"}
+        verb = "delete" if intent == "PRODUCT_DELETE" else "change"
+        return f"Which product do you want to {verb}? Send its ID or name.", {**pending, "waiting_for": "product"}
     if status == "need_changes":
         name = (pending.get("current") or {}).get("name")
         return (
@@ -167,7 +182,7 @@ async def run_product_manage_turn(
     pending_workflow: dict[str, Any] | None = None,
     groq_client: Any | None = None,
 ) -> ProductManageTurn:
-    """Run one turn of the create/update conversation; credentials stay out of model state."""
+    """Run one turn of the create/update/delete conversation; credentials stay out of model state."""
     if intent not in PRODUCT_MANAGE_INTENTS:
         raise ValueError(f"Unsupported product intent: {intent}")
     pending = (
@@ -188,9 +203,7 @@ async def run_product_manage_turn(
     client = groq_client or AsyncGroq(api_key=settings.GROQ_API_KEY)
     try:
         tools = build_product_manage_tools(access_token, role, state)
-        tools = [item for item in tools if item.name == (
-            "create_product_tool" if intent == "PRODUCT_CREATE" else "update_product_tool"
-        )]
+        tools = [item for item in tools if item.name == _TOOLS[intent]]
         graph = _build_graph(tools, client)
         result = await graph.ainvoke(
             {

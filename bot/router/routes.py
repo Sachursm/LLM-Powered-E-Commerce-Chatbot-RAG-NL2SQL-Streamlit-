@@ -35,6 +35,14 @@ ROUTE_UTTERANCES = MappingProxyType(
             "find a Bluetooth mouse",
             "what products do I have",
             "what are the products you have",
+            "show electronics products",
+            "what products are in the shoes category",
+            "browse products in the home appliances category",
+            "show items from the clothing category",
+            "show products in the shoes category",
+            "search for gaming chairs with high rating",
+            "I am looking for cotton t-shirts under 800",
+            "show the products from Bodysuit",
         ),
         "PRODUCT_DETAIL": (
             "tell me about product 25",
@@ -45,19 +53,102 @@ ROUTE_UTTERANCES = MappingProxyType(
             "what is this product's rating",
             "is this product available right now",
             "give me the specifications for this item",
+            "show me the first product",
+            "tell me more about the 2nd one",
+            "open the last one",
+            "what is the description of product 3",
+            "show product 812",
+            "details of product id 45",
+            "give me full details of #455",
         ),
         "CATEGORY": (
             "show me all product categories",
             "what categories do you have",
-            "show electronics products",
-            "what products are in the shoes category",
             "list the available categories",
             "which categories are available in the store",
             "which product sections can I browse",
-            "browse products in the home appliances category",
-            "show items from the clothing category",
+            "do you have a footwear category",
+            "show categories like shoes",
+            "is there a category for jewellery",
+            "what categories are there",
+            "do you have a category for bags",
+            "is there any category for kids",
+            "which category has sunglasses",
+            "view all product departments",
+            "list all shop categories",
+            "display the store catalog taxonomy",
+            "show all merchandise categories",
+            "what departments do you sell",
+            "are there categories for home and kitchen",
+            "browse category list",
+            "can I see all category names",
+            "check if there is a category for books",
+        ),
+        "CATEGORY_CREATE": (
+            "create a new category",
+            "add a category",
+            "add a new product category",
+            "create a category called something new",
+            "I want to add a new category to the store",
+            "make a new category",
+            "add category Footwear",
+            "create product category Winter Wear",
+            "make a category named Smart Home Devices",
+            "setup a new category called Organic Groceries",
+            "introduce a new category for Sports Equipment",
+            "build a category called Men Accessories",
+            "insert category Electronics into store catalog",
+            "register a new product section called Pet Supplies",
+            "add a new department called Baby Products",
+            "create category Gaming Consoles under electronics",
+            "establish a category called Ethnic Wear",
+            "make a new product classification called Kitchenware",
+            "define a new category called Beauty and Personal Care",
+        ),
+        "CATEGORY_UPDATE": (
+            "rename a category",
+            "rename category shoes to footwear",
+            "change the name of a category",
+            "edit a category name",
+            "update the electronics category name",
+            "rename the clothing category",
+            "change shoes category to footwear",
+            "update category Footwear to Shoes & Slippers",
+            "modify category name from Mobiles to Smartphones",
+            "change category Clothes to Apparel",
+            "edit the name of category 5 to Stationery",
+            "rename category Home Decor to Home & Living",
+            "update the label of category Kids Wear",
+            "change category title for section 3",
+            "switch category name from Bags to Backpacks & Luggage",
+            "set category 12 name as Office Supplies",
+            "alter category name from Gadgets to Consumer Electronics",
+            "update category heading to Fitness Gear",
+            "rename the department Sports to Sports & Fitness",
+        ),
+        "CATEGORY_DELETE": (
+            "delete a category",
+            "remove a category",
+            "delete category boots",
+            "remove the shoes category",
+            "get rid of an unused category",
+            "remove a category from the store",
+            "remove shoes from categories",
+            "delete category Footwear",
+            "drop the category Men Clothing",
+            "remove category 8 from the store",
+            "erase category Books from the system",
+            "discard the Winter Wear category",
+            "purge category Home Appliances from the catalog",
+            "delete the department named Toys",
+            "remove Pet Supplies from store categories",
+            "scrap category ID 14",
+            "clear out the category Fashion Accessories",
+            "permanently delete category Luggage",
+            "eliminate the category Clearance Items",
         ),
         "CART": (
+            # Original base examples
             "show my cart",
             "add this shoe to my cart",
             "add product 25 to my cart",
@@ -70,6 +161,102 @@ ROUTE_UTTERANCES = MappingProxyType(
             "which items are currently in my basket",
             "view the contents of my shopping basket",
             "show the things I added to my cart",
+            # View / Show Cart (Read)
+            "view cart",
+            "open my shopping bag",
+            "check my cart items",
+            "display my cart",
+            "how many items are in my cart right now",
+            "let me see my basket",
+            "what do I have in my cart",
+            "show cart summary",
+            "take me to my cart",
+            "see my shopping bag",
+            "is there anything in my cart",
+            "list all items inside my cart",
+            "what's the total in my cart",
+            "go to my cart",
+            "review my cart before checkout",
+            # Add to Cart
+            "add this to my cart",
+            "put this item in my shopping cart",
+            "add the 2nd one to my cart",
+            "add product 45 to my basket",
+            "put the first shoe in my bag",
+            "add 2 of these to my cart",
+            "add the blue shirt to my shopping bag",
+            "put this into my cart",
+            "add this product to my basket",
+            "add to cart",
+            "put it in my cart",
+            "add the third item to my shopping bag",
+            "add item 12 to my cart with quantity 2",
+            "include this shoe in my cart",
+            "throw this in my cart",
+            "place this item into my shopping basket",
+            "add this laptop to my basket",
+            "add 3 pairs of these socks to my cart",
+            "put product ID 88 in my shopping bag",
+            "add this one to my cart",
+            # Update Quantity in Cart
+            "update quantity of product 25 to 2",
+            "make the quantity 5 for the black shoes",
+            "increase the quantity of sneakers by 1",
+            "decrease the quantity of the blue shirt to 1",
+            "add one more of this item to my cart",
+            "change the quantity of item 14 to 4",
+            "set quantity to 2 for product ID 108",
+            "reduce the shirts in my cart from 3 to 2",
+            "make it 2 pairs of socks instead of 1",
+            "bump up the wireless mouse count to 3",
+            "drop the headphone count down to 1",
+            "update the count for product 44 to 5 in my basket",
+            "change quantity from 1 to 3 for the Nike shoes",
+            "order 2 of this item instead in my bag",
+            "modify quantity of item 12 to 6",
+            "double the quantity of the running shoes",
+            "adjust the item count in my cart to 4",
+            "change how many of product 30 I'm buying to 2",
+            "update my cart to have 3 units of this item",
+            # Remove a Single Product from Cart
+            "delete product 22 from my cart",
+            "take the shoes out of my shopping bag",
+            "drop item 5 from my basket",
+            "discard the headphones from my cart",
+            "remove item ID 89 from the cart",
+            "get rid of the black t-shirt in my cart",
+            "take product 14 out of my shopping cart",
+            "delete this shoe from my bag",
+            "I don't want product 101 anymore, remove it",
+            "cancel the laptop in my cart",
+            "take off the running shorts from my basket",
+            "remove the last item I added to my cart",
+            "clear item 40 from the shopping bag",
+            "take out the wireless mouse from my cart",
+            "remove the red dress from my basket",
+            "delete product 73 from my list",
+            "dump item 19 from my cart",
+            # Delete / Empty / Clear Entire Cart
+            "empty my cart",
+            "clear my cart",
+            "delete everything in my cart",
+            "empty my shopping basket",
+            "clear out my shopping bag",
+            "remove all items from my cart",
+            "delete all products in my basket",
+            "reset my shopping cart",
+            "wipe my cart completely",
+            "dump everything in my cart",
+            "discard all items in my basket",
+            "clean out my cart",
+            "start over with an empty cart",
+            "clear everything I added to my cart",
+            "purge my shopping basket",
+            "remove everything from my bag",
+            "empty the whole cart",
+            "delete my cart contents",
+            "flush my shopping cart",
+            "clear all products from my basket",
         ),
         "ORDER": (
             "place an order",
@@ -190,8 +377,6 @@ ROUTE_UTTERANCES = MappingProxyType(
         "SELLER_PRODUCT": (
             "show my products",
             "show my seller products",
-            "remove a product from my seller catalog",
-            "delete my product listing",
             "show products that I sell",
             "what products do I sell",
             "list all the items in my shop",
@@ -210,6 +395,14 @@ ROUTE_UTTERANCES = MappingProxyType(
             "add a new laptop to my shop catalog",
             "create a product called Puma Runner priced 2999",
             "create product Samsung earbuds with price 1999 and stock 10",
+            "list an item named Wooden Dining Table for 15000",
+            "publish a new product in my store inventory",
+            "post a new product listing",
+            "I need to list a new piece of merchandise",
+            "add item iPhone 15 with price 79999 and inventory 25",
+            "put up a new listing for wireless mouse",
+            "register a new product to my merchant dashboard",
+            "onboard a new product into the database",
         ),
         "PRODUCT_UPDATE": (
             "update a product",
@@ -223,6 +416,36 @@ ROUTE_UTTERANCES = MappingProxyType(
             "change the category of my product",
             "change the image of my product",
             "set the price of product 40 to 2999",
+            "increase the stock of product 88 by 50",
+            "lower the price of item 104 to 499",
+            "modify product title for SKU 9982",
+            "mark product 15 as out of stock",
+            "change the thumbnail image for my blue denim jeans listing",
+            "raise the price of product 302 by 200",
+            "revise the specifications on product 410",
+            "update the tags and keywords for product 55",
+            "edit details of product ID 771",
+        ),
+        "PRODUCT_DELETE": (
+            "delete a product",
+            "remove a product from my store",
+            "delete product 45",
+            "remove item 102 from my catalog",
+            "take down product 89 from the store",
+            "get rid of product ID 552",
+            "unlist product 12 from sale",
+            "delete this item from my seller inventory",
+            "erase product listing 77",
+            "remove this merchandise from catalog",
+            "purge product 901 from the database",
+            "delete my listing for Bluetooth speaker",
+            "permanently remove product 64",
+            "drop product 33 from my shop listings",
+            "discard item listing 210",
+            "cancel the listing for product 19",
+            "delete product titled Leather Jacket",
+            "remove product 888 completely",
+            "clear product 404 from active listings",
         ),
         "SELLER_ORDER": (
             "show orders for products I sell",
@@ -336,8 +559,11 @@ ROUTE_DESCRIPTIONS = MappingProxyType(
     {
         "PRODUCT_SEARCH": "Browse or filter the product catalog.",
         "PRODUCT_DETAIL": "Ask for information about a specific product.",
-        "CATEGORY": "Browse product categories or products within a category.",
-        "CART": "Ask to view or change the shopping cart.",
+        "CATEGORY": "List the store's categories or find one by name.",
+        "CATEGORY_CREATE": "Create a new product category.",
+        "CATEGORY_UPDATE": "Rename an existing product category.",
+        "CATEGORY_DELETE": "Delete an existing product category.",
+        "CART": "View the shopping cart, add or remove items, change quantities, or empty it.",
         "ORDER": "Create or check out an order.",
         "ORDER_STATUS": "Ask about the user's existing orders or delivery status.",
         "ORDER_CANCEL": "Ask to cancel a specific or recent order.",
@@ -347,9 +573,10 @@ ROUTE_DESCRIPTIONS = MappingProxyType(
         "REVIEW": "Create, view, edit, or delete a product review.",
         "FAQ": "Ask about general store policies or service information.",
         "ACCOUNT": "View or manage the authenticated user's account.",
-        "SELLER_PRODUCT": "View or remove product listings owned by the seller.",
+        "SELLER_PRODUCT": "View the product listings owned by the seller.",
         "PRODUCT_CREATE": "Create a new product listing in the catalog.",
         "PRODUCT_UPDATE": "Change the details of an existing product listing.",
+        "PRODUCT_DELETE": "Delete an existing product listing.",
         "SELLER_ORDER": "View or handle orders associated with the seller's products.",
         "SELLER_PAYOUT": "Ask about seller payouts, bank details, or commission.",
         "ADMIN": "Ask for administrative platform management information or actions.",
@@ -381,12 +608,17 @@ ROLE_DISAMBIGUATION = MappingProxyType(
 )
 
 
-# Product create/update commands carry brand, price and category words that pull
+# Product and category commands carry brand, price and category words that pull
 # the embedding match toward search or category, so a clear command shape is
-# matched first. Messages about carts, orders, reviews or accounts never match.
+# matched first. For the same reason the examples above avoid brand and product
+# names ("delete listing for Puma sneakers" pulled "Puma shoes" searches to delete). Messages about carts, orders, reviews or accounts never match.
 _NOT_A_LISTING_CHANGE = re.compile(
     r"\b(?:cart|basket|wishlist|orders?|reviews?|ratings?|feedback|address|profile|password|account)\b",
     re.IGNORECASE,
+)
+_DELETE_VERB = (
+    r"(?:permanently\s+)?(?:delete|remove|drop|erase|purge|scrap|discard|eliminate|unlist"
+    r"|take\s+down|clear(?:\s+out)?|get\s+rid\s+of)\b"
 )
 COMMAND_PATTERNS = (
     (
@@ -394,7 +626,7 @@ COMMAND_PATTERNS = (
         re.compile(
             r"^(?:please\s+)?(?:i\s+(?:want|would like)\s+to\s+)?"
             r"(?:(?:create|add|upload)\s+(?:a\s+|an\s+)?(?:new\s+)?|list\s+(?:a\s+)?new\s+)"
-            r"(?:products?|items?|listings?)\b",
+            r"(?:products?|items?|listings?)\b(?!\s+categor)",
             re.IGNORECASE,
         ),
     ),
@@ -407,11 +639,56 @@ COMMAND_PATTERNS = (
             re.IGNORECASE,
         ),
     ),
+    (
+        "CATEGORY_CREATE",
+        re.compile(
+            r"^(?:please\s+)?(?:i\s+(?:want|would like)\s+to\s+)?(?:create|add|make)\s+"
+            r"(?:a\s+|an\s+)?(?:new\s+)?(?:product\s+)?categor(?:y|ies)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "CATEGORY_UPDATE",
+        re.compile(
+            r"^(?:please\s+)?(?:rename\b(?=.*\bcategor(?:y|ies)\b)"
+            r"|(?:update|edit|change)\s+(?:the\s+)?(?:name\s+of\s+)?(?:a\s+|the\s+)?(?:[\w-]+\s+)?categor(?:y|ies)(?:\s+name)?\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    # "remove shoes from categories" is a category delete; "remove product 45"
+    # is a product delete. A message naming both is left to the embeddings.
+    (
+        "CATEGORY_DELETE",
+        re.compile(
+            r"^(?:please\s+)?" + _DELETE_VERB
+            + r"(?=.*\b(?:categor(?:y|ies)|departments?)\b)(?!.*\b(?:products?|items?|listings?)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "PRODUCT_DELETE",
+        re.compile(
+            r"^(?:please\s+)?" + _DELETE_VERB
+            + r"(?=.*\b(?:products?|items?|listings?|merchandise)\b)(?!.*\bcategor(?:y|ies)\b)",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
+
+# A message about the cart is a cart request whatever its verb ("cancel the
+# laptop in my cart", "order 2 of this in my bag"), unless it checks out the
+# cart ("checkout my cart", "buy the contents of my cart" are orders).
+_CART_WORDS = re.compile(r"\b(?:cart|basket|(?:shopping|my)\s+bag)\b", re.IGNORECASE)
+_CART_CHECKOUT = re.compile(
+    r"\b(?:check\s?out|purchase|buy|submit|place\s+(?:an?\s+|my\s+|the\s+)?order)\b", re.IGNORECASE
 )
 
 
 def match_command_intent(text: str) -> str | None:
-    """Return the intent for a clear product create/update command, if any."""
+    """Return the intent for a clear cart, product or category command, if any."""
+    if _CART_WORDS.search(text):
+        return None if _CART_CHECKOUT.search(text) else "CART"
     if _NOT_A_LISTING_CHANGE.search(text):
         return None
     stripped = text.strip()
